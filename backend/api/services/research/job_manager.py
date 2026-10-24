@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from django.conf import settings
@@ -18,6 +19,7 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from api.models import ResearchRun, ResearchRunEvent, ResearchSession
+from .execution import ResearchExecutionError
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,13 @@ MAX_RUN_WIRE_BYTES = 2 * 1024 * 1024
 MAX_TEXT_DELTA_BYTES = 2048
 IDEMPOTENCY_KEY_RE = re.compile(r'^[\x20-\x7e]{1,64}$')
 ACTIVE_STATUSES = ('queued', 'running')
+
+_research_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='deep-research')
+
+
+def submit_research_task(function, *args, **kwargs):
+    """Submit research work without occupying translation worker capacity."""
+    return _research_executor.submit(function, *args, **kwargs)
 
 
 class ResearchRunError(Exception):
@@ -65,14 +74,16 @@ def validate_idempotency_key(value: str | None) -> str:
 def request_digest(
     query: str, local_only: bool, session_id: str | None,
     model_config_id: str | None = None, consent=None,
+    execution_source: str | None = None,
 ) -> str:
     request = {
         'query': query, 'local_only': bool(local_only),
         'session': str(session_id) if session_id else 'create',
     }
-    if model_config_id is not None or consent is not None:
+    if execution_source is not None or model_config_id is not None or consent is not None:
         request['research_authorization'] = {
-            'mode': 'byok_first_run', 'model_config_id': model_config_id,
+            'source': execution_source,
+            'model_config_id': model_config_id,
             'consent': consent is True,
         }
     canonical = json.dumps(
@@ -186,10 +197,10 @@ def _snapshot(run_id, run_token):
     from .access import require_session_evidence
     require_session_evidence(run.session, run.user)
     if run.execution_snapshot:
-        from .byok_execution import ResearchBYOKError, verify_snapshot
+        from .execution import verify_snapshot
         try:
             verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
-        except ResearchBYOKError as exc:
+        except ResearchExecutionError as exc:
             raise ResearchRunError(
                 'research_authorization_changed', exc.message, 403,
             ) from None
@@ -386,7 +397,7 @@ def _heartbeat(run_id, run_token):
         thread.join(timeout=2)
 
 
-def _persist_tool_result(run_id, run_token, session, tool_name, args, result, byok_snapshot=None):
+def _persist_tool_result(run_id, run_token, session, tool_name, args, result, execution_snapshot=None):
     guard = execution_guard(run_id, run_token)
 
     def persist():
@@ -400,14 +411,14 @@ def _persist_tool_result(run_id, run_token, session, tool_name, args, result, by
             _save_search_result(session, tool_name, args, result, guard=guard)
         guard()
 
-    if byok_snapshot is not None:
-        from .byok_execution import commit_with_snapshot
-        commit_with_snapshot(byok_snapshot, owner_id=session.user_id, persist=persist)
+    if execution_snapshot is not None:
+        from .execution import commit_with_snapshot
+        commit_with_snapshot(execution_snapshot, owner_id=session.user_id, persist=persist)
     else:
         persist()
 
 
-def _persist_success(run_id, run_token, session, messages, byok_snapshot=None):
+def _persist_success(run_id, run_token, session, messages, execution_snapshot=None):
     def persist():
         now = timezone.now()
         event_type, data = 'complete', {}
@@ -438,9 +449,9 @@ def _persist_success(run_id, run_token, session, messages, byok_snapshot=None):
             if not changed:
                 raise ResearchRunError('research_run_changed', '研究任务已取消或租约已失效。')
             values = {'messages': messages, 'title': session.title, 'updated_at': now}
-            if byok_snapshot is not None:
-                from .byok_execution import continuation_payload, visible_messages
-                values['native_continuation'] = continuation_payload(byok_snapshot, messages)
+            if execution_snapshot is not None:
+                from .execution import continuation_payload, visible_messages
+                values['native_continuation'] = continuation_payload(execution_snapshot, messages)
                 values['messages'] = visible_messages(messages)
             updated = ResearchSession.objects.filter(
                 pk=session.pk, user_id=session.user_id,
@@ -453,9 +464,9 @@ def _persist_success(run_id, run_token, session, messages, byok_snapshot=None):
             )
         _notify(run_id)
 
-    if byok_snapshot is not None:
-        from .byok_execution import commit_with_snapshot
-        commit_with_snapshot(byok_snapshot, owner_id=session.user_id, persist=persist)
+    if execution_snapshot is not None:
+        from .execution import commit_with_snapshot
+        commit_with_snapshot(execution_snapshot, owner_id=session.user_id, persist=persist)
     else:
         persist()
 
@@ -481,7 +492,7 @@ def _run_worker(run_id, query, local_only):
         guard()
         run = ResearchRun.objects.select_related('session', 'user').get(pk=run_id)
         session = run.session
-        byok_snapshot = run.execution_snapshot or None
+        execution_snapshot = run.execution_snapshot or None
         from .agent_loop import run_agent_loop
 
         def emit(event_type, data):
@@ -493,7 +504,10 @@ def _run_worker(run_id, query, local_only):
             append_event(run_id, token, event_type, data, guard)
 
         def persist_completion(messages):
-            _persist_success(run_id, token, session, messages, byok_snapshot=byok_snapshot)
+            _persist_success(
+                run_id, token, session, messages,
+                execution_snapshot=execution_snapshot,
+            )
 
         with _heartbeat(run_id, token):
             run_agent_loop(
@@ -502,11 +516,13 @@ def _run_worker(run_id, query, local_only):
                 persist_completion=persist_completion,
                 persist_tool_result=lambda name, args, result: _persist_tool_result(
                     run_id, token, session, name, args, result,
-                    byok_snapshot=byok_snapshot,
+                    execution_snapshot=execution_snapshot,
                 ),
                 user=run.user,
-                byok_snapshot=byok_snapshot,
+                execution_snapshot=execution_snapshot,
             )
+    except ResearchExecutionError as exc:
+        _finish_failed(run_id, token, f'research_{exc.code}', exc.message)
     except ResearchRunError as exc:
         if exc.error_code == 'research_lease_lost':
             _interrupt_expired(run_id, token)
@@ -535,8 +551,7 @@ def _dispatch(run_id, query, local_only):
             return
         _dispatching.add(key)
     try:
-        from api.services.chatgpt_subscription_jobs import submit_background_task
-        submit_background_task(_run_worker, run_id, query, local_only)
+        submit_research_task(_run_worker, run_id, query, local_only)
     except Exception as exc:
         with _dispatch_lock:
             _dispatching.discard(key)
@@ -559,10 +574,10 @@ def _attach_existing(run, digest, query, local_only):
     run = _expire_run_if_needed(run)
     if run.status == 'queued':
         if run.execution_snapshot:
-            from .byok_execution import ResearchBYOKError, verify_snapshot
+            from .execution import ResearchExecutionError, verify_snapshot
             try:
                 verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
-            except ResearchBYOKError as exc:
+            except ResearchExecutionError as exc:
                 raise ResearchRunError(
                     'research_authorization_changed', exc.message, 403,
                 ) from None
@@ -574,19 +589,31 @@ def _attach_existing(run, digest, query, local_only):
 
 def submit_research_run(
     user, *, session_id, query: str, local_only: bool, idempotency_key: str,
+    execution_source: str | None = None,
     model_config_id: str | None = None, consent=None,
 ):
-    """Create an owner-private run; T09 requires explicit model + consent."""
-    byok_requested = model_config_id is not None or consent is not None
-    if byok_requested and (consent is not True or type(model_config_id) is not str):
+    """Create an owner-private run with one explicit, fenced execution source."""
+    authorization_requested = (
+        execution_source is not None or model_config_id is not None or consent is not None
+    )
+    valid_authorization = (
+        execution_source == 'byok'
+        and consent is True
+        and type(model_config_id) is str
+    ) or (
+        execution_source == 'chatgpt_subscription'
+        and consent is True
+        and model_config_id is None
+    )
+    if authorization_requested and not valid_authorization:
         raise ResearchRunError(
             'research_consent_required',
-            '选择个人研究模型并明确同意服务商计费后才能发起。',
+            '选择已验证的研究模型来源并明确同意本次调用后才能发起。',
             400,
         )
-    if not settings.PUBLIC_AI_ENABLED and not byok_requested:
+    if not settings.PUBLIC_AI_ENABLED and not authorization_requested:
         raise ResearchRunError('ai_disabled', '此 AI 功能当前已关闭。', 403)
-    if _blocked_hosted_environment() and not byok_requested:
+    if _blocked_hosted_environment() and not authorization_requested:
         raise ResearchRunError(
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
         )
@@ -596,7 +623,8 @@ def submit_research_run(
     query = query.strip()
     digest = request_digest(
         query, local_only, session_id, model_config_id=model_config_id,
-        consent=True if byok_requested else None,
+        consent=True if authorization_requested else None,
+        execution_source=execution_source,
     )
     if session_id is not None:
         session = ResearchSession.objects.filter(pk=session_id, user=user).first()
@@ -620,7 +648,7 @@ def submit_research_run(
         raise ResearchRunError('research_capacity_reached', '研究任务容量已满，请稍后重试。', 503)
     try:
         with transaction.atomic():
-            if byok_requested:
+            if authorization_requested:
                 from api.services.ai_credentials import lock_owner
                 lock_owner(user.pk)
             raced = ResearchRun.objects.select_related('session').filter(
@@ -636,24 +664,27 @@ def submit_research_run(
                     user=user, session=session, status__in=ACTIVE_STATUSES,
                 ).exists():
                     raise ResearchRunError('research_run_active', '此研究会话已有正在运行的任务。', 409)
-            if session_id is not None and not byok_requested and (
-                session.native_continuation or session.runs.filter(
-                    execution_snapshot__model__isnull=False,
-                ).exists()
+            if session_id is not None and not authorization_requested and (
+                session.native_continuation
+                or session.runs.exclude(execution_snapshot={}).exists()
             ):
                 raise ResearchRunError('research_consent_required', '续问必须明确同意使用会话原模型。', 400)
             execution_snapshot = {}
-            if byok_requested:
-                from .byok_execution import ResearchBYOKError, capture_snapshot, followup_snapshot
+            if authorization_requested:
+                from .execution import capture_snapshot, followup_snapshot
                 try:
                     execution_snapshot = (
-                        followup_snapshot(session, user, model_config_id)
-                        if session_id is not None else capture_snapshot(user, model_config_id)
+                        followup_snapshot(
+                            session, user, execution_source, model_config_id,
+                        )
+                        if session_id is not None else capture_snapshot(
+                            user, execution_source, model_config_id,
+                        )
                     )
-                except ResearchBYOKError as exc:
+                except ResearchExecutionError as exc:
                     raise ResearchRunError(
                         f'research_{exc.code}', exc.message, 409,
-                        request_rejected=session_id is None,
+                        request_rejected=True,
                     ) from None
             if session_id is None:
                 session = ResearchSession.objects.create(user=user, title='', messages=[])
@@ -705,10 +736,10 @@ def resume_queued_run(user, session, run_id):
     if run is None:
         raise ResearchRunError('research_run_not_found', '研究任务不存在。', 404)
     if run.execution_snapshot:
-        from .byok_execution import ResearchBYOKError, verify_snapshot
+        from .execution import ResearchExecutionError, verify_snapshot
         try:
             verify_snapshot(run.execution_snapshot, owner_id=run.user_id)
-        except ResearchBYOKError as exc:
+        except ResearchExecutionError as exc:
             raise ResearchRunError(
                 'research_authorization_changed', exc.message, 403,
             ) from None

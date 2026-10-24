@@ -77,7 +77,11 @@ export interface ResearchLatestRunState {
 }
 
 export interface ResearchSessionDetail extends ResearchSessionSummary {
-  research_model?: { model_config_id: string; model_id: string } | null
+  research_model?: {
+    source: 'byok' | 'chatgpt_subscription'
+    model_config_id: string | null
+    model_id: string
+  } | null
   messages: StoredResearchMessage[]
   latest_run?: ResearchLatestRunState | null
 }
@@ -213,9 +217,21 @@ export function parseResearchSessionDetail(value: unknown): ResearchSessionDetai
     }
   }
   const model = value.research_model
+  const modelSource = isRecord(model) ? model.source : null
+  const validModelConfig = modelSource === 'byok'
+    ? typeof (model as Record<string, unknown>).model_config_id === 'string'
+    : modelSource === 'chatgpt_subscription'
+      && (model as Record<string, unknown>).model_config_id === null
   const detail: ResearchSessionDetail = { ...summary, messages,
-    research_model: isRecord(model) && typeof model.model_config_id === 'string' && typeof model.model_id === 'string'
-      ? { model_config_id: model.model_config_id, model_id: model.model_id } : null,
+    research_model: isRecord(model)
+      && (modelSource === 'byok' || modelSource === 'chatgpt_subscription')
+      && validModelConfig
+      && typeof model.model_id === 'string'
+      ? {
+        source: modelSource,
+        model_config_id: model.model_config_id as string | null,
+        model_id: model.model_id,
+      } : null,
   }
   if (Object.prototype.hasOwnProperty.call(value, 'latest_run')) detail.latest_run = latestRun
   return detail

@@ -56,10 +56,9 @@ export async function deleteResearchSession(sessionId: string): Promise<void> {
   await deleteResearchSessionRequest(sessionId)
 }
 
-export interface ResearchCreateAuthorization {
-  consent: true
-  modelConfigId: string
-}
+export type ResearchCreateAuthorization =
+  | { executionSource: 'byok'; consent: true; modelConfigId: string }
+  | { executionSource: 'chatgpt_subscription'; consent: true }
 
 export function createResearchStream(
   query: string,

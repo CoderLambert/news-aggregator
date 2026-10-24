@@ -8,9 +8,36 @@ import {
   ConnectionRequestError, createAIModel, deleteAIModel, listAIModelCatalog, listAIModels,
   discoverAIModels, getAIConnectionDiagnostics, patchAIModel, probeAIModel,
   type AIConnection, type AIConnectionDiagnostics, type AIModel, type AIModelCatalogEntry,
+  type AIModelProbeReceipt,
 } from '@/services/aiConnectionsApi'
 
 const stateLabel = { supported: '已验证支持', unsupported: '已验证不支持', unknown: '未知 / 待验证' }
+type ProbeFeedback = { tone: 'success' | 'warning'; message: string }
+
+function probeResultMessage(receipt: AIModelProbeReceipt): ProbeFeedback {
+  const capability = receipt.probe_kind === 'text' ? '文本' : '工具调用'
+  if (receipt.status === 'succeeded' && receipt.capability === 'supported' && !receipt.stale) {
+    return { tone: 'success', message: `${capability}能力测试通过，已验证支持。` }
+  }
+  if (receipt.status === 'unsupported' || receipt.capability === 'unsupported') {
+    return { tone: 'warning', message: `${capability}能力测试完成，已验证不支持。` }
+  }
+  const reason = {
+    result_unknown: '本地 AI 网关或网络未返回可验证结果。',
+    incomplete_or_invalid: '模型返回了不完整或无法验证的响应。',
+    tool_call_not_observed: '模型未按要求调用测试工具。',
+    gateway_rejected: '本地 AI 网关拒绝了请求。',
+    authorization_changed: '授权或模型配置在测试期间发生变化，结果已丢弃。',
+  }[receipt.safe_error_code]
+  if (receipt.stale || receipt.status === 'stale') {
+    return { tone: 'warning', message: '测试结果未确认：授权或模型配置已变化，旧结果未写入。不会自动重试。' }
+  }
+  return {
+    tone: 'warning',
+    message: `测试结果未确认：${reason ?? '未获得可验证的能力结论。'}不会自动重试。`,
+  }
+}
+
 function safeError(error: unknown) {
   return error instanceof ConnectionRequestError ? error.message : '操作结果未知。请重新读取模型与探针状态。'
 }
@@ -26,6 +53,7 @@ export default function AIModelsManager({ connection, viewer, onModelsChanged }:
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [probeFeedback, setProbeFeedback] = useState<ProbeFeedback | null>(null)
   const [selected, setSelected] = useState('')
   const [manualId, setManualId] = useState('')
   const [edit, setEdit] = useState<{ model: AIModel; field: 'model_id' | 'display_name'; value: string } | null>(null)
@@ -57,21 +85,22 @@ export default function AIModelsManager({ connection, viewer, onModelsChanged }:
 
   const reload = () => {
     if (writing.current || loading) return
-    setLoading(true); setError(''); setNotice(''); setRevision(value => value + 1)
+    setLoading(true); setError(''); setNotice(''); setProbeFeedback(null); setRevision(value => value + 1)
   }
-  const perform = async (action: (signal: AbortSignal) => Promise<unknown>, note: string) => {
+  const perform = async <T,>(action: (signal: AbortSignal) => Promise<T>, feedback: string | ((result: T) => ProbeFeedback)) => {
     const controller = alive.current
     if (writing.current || !controller || controller.signal.aborted || !models) return
     writing.current = true
-    setBusy(true); setError(''); setNotice('')
+    setBusy(true); setError(''); setNotice(''); setProbeFeedback(null)
     try {
-      await action(controller.signal)
+      const result = await action(controller.signal)
       if (controller.signal.aborted) return
       const updated = await listAIModels(connection, controller.signal)
       if (controller.signal.aborted) return
       setModels(updated)
       onModelsChanged?.()
-      setNotice(note)
+      if (typeof feedback === 'function') setProbeFeedback(feedback(result))
+      else setNotice(feedback)
       setEdit(null); setConfirmDelete(null); setBillingConsent(false)
     } catch (reason) {
       if (!controller.signal.aborted) {
@@ -101,12 +130,12 @@ export default function AIModelsManager({ connection, viewer, onModelsChanged }:
     if (!billingConsent || !connection.is_enabled || !model.has_trusted_route) return
     const requestId = crypto.randomUUID()
     void perform(signal => probeAIModel(connection, model, kind, requestId, viewer, signal),
-      '已记录本次测试结果。文本和工具能力分别显示；结果未知时不会自动重试。')
+      probeResultMessage)
   }
   const inspect = async (kind: 'discover' | 'diagnostics') => {
     const controller = alive.current
     if (writing.current || !controller || controller.signal.aborted || !models) return
-    writing.current = true; setBusy(true); setError(''); setNotice('')
+    writing.current = true; setBusy(true); setError(''); setNotice(''); setProbeFeedback(null)
     try {
       if (kind === 'diagnostics') {
         const result = await getAIConnectionDiagnostics(connection, controller.signal)
@@ -131,6 +160,9 @@ export default function AIModelsManager({ connection, viewer, onModelsChanged }:
     <p className="workspace-caption">添加服务商提供的模型，验证后即可设为默认。</p>
     {error && <p role="alert" className="workspace-error">{error}</p>}
     {notice && <p role="status" className="workspace-notice">{notice}</p>}
+    {probeFeedback && <p role="status" className={probeFeedback.tone === 'success'
+      ? 'workspace-notice'
+      : 'rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-200'}>{probeFeedback.message}</p>}
     {catalogNotice && <p role="status" className="workspace-caption">{catalogNotice}</p>}
     <div className="workspace-actions flex-wrap"><Button type="button" variant="outline" size="sm" disabled={busy || loading} onClick={reload}>重新读取模型</Button>
       {connection.model_discovery_supported && <Button type="button" variant="outline" size="sm"

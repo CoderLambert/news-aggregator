@@ -47,8 +47,11 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
   const [internalOpen, setInternalOpen] = useState(false)
   const isOpen = open ?? internalOpen
   const defaultModel = useDefaultAIModel(user?.id ?? null, 'article_qa', isOpen)
-  const selectedModelId = defaultModel.selection?.model_config_id ?? null
-  const defaultUnavailable = Boolean(user && (!selectedModelId || defaultModel.isPending || defaultModel.isError))
+  const selectedSource = defaultModel.selection?.selection_source ?? null
+  const selectedModelId = selectedSource === 'byok'
+    ? defaultModel.selection?.model_config_id ?? null : null
+  const hasExecutionSource = selectedSource === 'chatgpt_subscription' || Boolean(selectedModelId)
+  const defaultUnavailable = Boolean(user && (!hasExecutionSource || defaultModel.isPending || defaultModel.isError))
   const setIsOpen = useCallback((nextOpen: boolean) => {
     if (open === undefined) setInternalOpen(nextOpen)
     onOpenChange?.(nextOpen)
@@ -82,9 +85,10 @@ export default function NewsChatAssistant({ newsId, open, onOpenChange, translat
     refresh: refreshSuggestions,
     error: suggestionError,
     modelConfigId: suggestionModelId,
+    selectionSource: suggestionSource,
   } = useSuggestedQuestions(newsId, isOpen, articleContext?.contentRevision ?? 0)
 
-  const canGenerateSuggestions = !user || Boolean(suggestionModelId)
+  const canGenerateSuggestions = !user || suggestionSource === 'chatgpt_subscription' || Boolean(suggestionModelId)
   const generateSuggestions = () => {
     if (!canGenerateSuggestions) return
     // Clicking generate/refresh is the explicit authorization for this request.

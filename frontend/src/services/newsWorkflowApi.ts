@@ -318,7 +318,13 @@ export async function cancelChatTurn(id: NewsId, turnId: string): Promise<'cance
   return cancelPersonalChatTurnRequest(id, turnId)
 }
 
-export async function fetchSuggestedQuestions(id: NewsId, options: { force?: boolean; modelConfigId?: string; consent?: true; signal: AbortSignal }): Promise<SuggestedQuestionsSnapshot> {
+export async function fetchSuggestedQuestions(id: NewsId, options: {
+  force?: boolean
+  executionSource?: 'byok' | 'chatgpt_subscription'
+  modelConfigId?: string
+  consent?: true
+  signal: AbortSignal
+}): Promise<SuggestedQuestionsSnapshot> {
   const data: unknown = await fetchSuggestedQuestionsRequest(id, options)
   return parseSuggestedQuestions(data)
 }
@@ -344,8 +350,9 @@ export async function cancelTranslationJob(jobId: string, generation: number): P
 export async function* chatStream(
   id: NewsId,
   question: string,
-  options: { webSearch: boolean; modelConfigId?: string | null; billingConsent?: boolean;
-    turnId?: string; translationResultId?: number | null; translationMode?: ChatTranslationMode; signal: AbortSignal },
+  options: { webSearch: boolean; executionSource?: 'byok' | 'chatgpt_subscription';
+    modelConfigId?: string | null; billingConsent?: boolean; turnId?: string;
+    translationResultId?: number | null; translationMode?: ChatTranslationMode; signal: AbortSignal },
 ): AsyncGenerator<string> {
   for await (const rawChunk of streamChat(id, question, options)) {
     if (typeof rawChunk === 'string') yield rawChunk

@@ -125,6 +125,14 @@ RSS T14 已合并 [#142](https://github.com/CoderLambert/news-aggregator/pull/14
 - 本地脏树镜像 `newshub:local-dirty-6d9f0110248d3433f17406c9bf91343a5c720a5e` 已构建并部署到隔离项目 `newshub-main-ad36959`。首次聚合检查实际发现 Miniflux PostgreSQL 数据目录权限错误；修复该本地运行目录的初始化边界和所有权后，命令、受保护 HTTP 接口及真实浏览器管理面板均显示 7/7 已配置服务正常。Capabilities 实测 `site_mode=full`，全文读取、翻译、问答、推荐问题、TTS、研究和 ChatGPT Subscription 站点功能均启用；个人 BYOK 研究仍要求本人完成连接、能力探针和任务偏好绑定。
 - 此证据仅覆盖本机部署和合成/本地检查；完整测试套件、正式 CI、生产部署、真实 Provider、付费调用和真实外部订阅源验收均 `NOT_RUN`。
 
+### ChatGPT Subscription 文本任务与深度研究接入（2026-10-24）
+
+- Stage A 已将当前用户明确授权的 ChatGPT Subscription 接入新闻问答、问题推荐和全文翻译，并在模型用途偏好中与 BYOK 分来源保存；调用请求必须携带明确来源，不会在订阅与 BYOK 之间静默回退。Stage A 本地提交为 `802049c1d917b262e3f3ae6902e19ce40f208dcb`。
+- Stage B 增加模型级深度研究工具能力验证。用户须明确同意一次验证调用；结果保存为不可变 capability receipt，并绑定连接 generation、当前模型和授权状态。只有当前模型的最新回执为 `supported` 时才能选作深度研究；连接、模型或授权发生变化会 fail closed。
+- 深度研究执行层已抽成来源无关入口，BYOK 与订阅分别维护快照和 fencing。订阅路径使用 Responses 原生工具项与 continuation，不接受客户端伪造的模型配置、不复用 BYOK Key，也不允许失败后改走另一来源；发送和提交前继续校验 owner、连接、模型与回执。
+- 本地复用缓存镜像、禁外网验证：相关后端集合 137 项及 2 个子测试通过，修复探针目标账号竞态后的最新研究/公共策略门禁 42 项通过；前端相关 7 个文件 85 项、TypeScript、隔离目录生产构建通过，ESLint 0 error（保留 1 个既有 hooks warning）。真实浏览器使用合成 API 验证了能力探针必须先同意额度、支持回执会开放 AI 设置中的深度研究订阅选项，以及每次研究发送仍须单独同意订阅额度。
+- 真实 ChatGPT Provider、实际付费/订阅额度调用、生产配置与迁移、完整测试套件、正式 CI、推送和生产 UAT 均 `NOT_RUN`，不得由本地合成证据推断为通过。
+
 ## 2. 第 8 批实施状态与后续候选（最多两个独立写入目标）
 
 ### DeepSeek 有界真实验收与 T02 Flash 探针差额（2026-10-20）

@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import ChatGPTSubscriptionSettings from '@/pages/ChatGPTSubscriptionSettings'
@@ -12,6 +13,7 @@ const api = vi.hoisted(() => ({
   startChatGPTSubscriptionConnect: vi.fn(),
   activateChatGPTSubscriptionConnection: vi.fn(),
   selectChatGPTSubscriptionModel: vi.fn(),
+  probeChatGPTSubscriptionResearch: vi.fn(),
   disconnectChatGPTSubscription: vi.fn(),
 }))
 const authState = vi.hoisted(() => ({ user: { id: 7, username: 'reader' } }))
@@ -87,6 +89,9 @@ beforeEach(() => {
       active: true,
       connected: true,
       needs_reauth: false,
+      research_tools: {
+        status: 'not_tested', model_slug: null, safe_error_code: '', tested_at: null,
+      },
       updated_at: '2026-10-08T00:00:00Z',
     }],
   })
@@ -107,6 +112,12 @@ beforeEach(() => {
   })
   api.activateChatGPTSubscriptionConnection.mockResolvedValue({})
   api.selectChatGPTSubscriptionModel.mockResolvedValue({ selected_model: 'listed-model-slug' })
+  api.probeChatGPTSubscriptionResearch.mockResolvedValue({
+    status: 'supported',
+    model_slug: 'listed-model-slug',
+    safe_error_code: '',
+    tested_at: '2026-10-08T00:05:00Z',
+  })
   api.disconnectChatGPTSubscription.mockResolvedValue({ disconnected: true, revocation_confirmed: true })
 })
 
@@ -133,6 +144,40 @@ describe('ChatGPT subscription settings', () => {
     await waitFor(() => expect(screen.getByRole('option', { name: 'Visible Model' })).toBeTruthy())
     fireEvent.change(select, { target: { value: 'listed-model-slug' } })
     await waitFor(() => expect(api.selectChatGPTSubscriptionModel).toHaveBeenCalledWith('connection-a', 'listed-model-slug'))
+  })
+
+  it('requires explicit quota consent before probing deep-research tools', async () => {
+    api.fetchChatGPTSubscriptionStatus.mockResolvedValueOnce({
+      active_connection_id: 'connection-a',
+      connections: [{
+        id: 'connection-a',
+        account_name: 'Reader account',
+        account_email: 'reader@example.com',
+        selected_model: 'listed-model-slug',
+        active: true,
+        connected: true,
+        needs_reauth: false,
+        research_tools: {
+          status: 'not_tested', model_slug: null, safe_error_code: '', tested_at: null,
+        },
+        updated_at: '2026-10-08T00:00:00Z',
+      }],
+    })
+    api.fetchChatGPTSubscriptionModels.mockResolvedValueOnce({
+      selected_model: 'listed-model-slug',
+      models: [{ slug: 'listed-model-slug', display_name: 'Visible Model' }],
+    })
+    renderSettings()
+    expect(await screen.findByText(/尚未验证当前模型/)).toBeTruthy()
+    const probe = screen.getByRole('button', { name: '验证深度研究能力' })
+    expect(probe).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox', {
+      name: '同意使用订阅额度验证深度研究能力',
+    }))
+    await userEvent.click(probe)
+    await waitFor(() => expect(api.probeChatGPTSubscriptionResearch)
+      .toHaveBeenCalledWith('connection-a', expect.anything()))
+    expect(await screen.findByText(/已验证工具调用能力/)).toBeTruthy()
   })
 
   it('stores connection state under the authenticated local viewer key', async () => {

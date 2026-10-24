@@ -106,17 +106,21 @@ export interface ResearchResultsParams extends ApiQueryParams {
   detail?: string
 }
 
+export type ResearchExecutionSource = 'byok' | 'chatgpt_subscription'
+
 export interface ResearchStreamOptions {
   localOnly?: boolean
   idempotencyKey?: string
   signal?: AbortSignal
   onSessionId?: (sessionId: string) => void
   onRunId?: (runId: string) => void
+  executionSource?: ResearchExecutionSource
   modelConfigId?: string
   consent?: true
 }
 
 export interface ResearchChatStreamOptions {
+  executionSource?: ResearchExecutionSource
   modelConfigId?: string
   consent?: true
   localOnly?: boolean
@@ -137,6 +141,7 @@ export type OpenResearchSessionStreamResponse =
   | { kind: 'stream'; events: AsyncIterable<unknown> }
 
 interface SuggestedQuestionsOptions {
+  executionSource?: 'byok' | 'chatgpt_subscription'
   modelConfigId?: string
   consent?: true
   force?: boolean
@@ -146,6 +151,7 @@ interface SuggestedQuestionsOptions {
 export type ChatTranslationMode = 'current' | 'original' | 'result'
 
 interface ChatStreamOptions {
+  executionSource?: 'byok' | 'chatgpt_subscription'
   webSearch?: boolean
   modelConfigId?: string | null
   billingConsent?: boolean
@@ -358,17 +364,17 @@ export function clearChatHistory(newsId: NewsId, signal?: AbortSignal): Promise<
   return api.delete<unknown>(`/news/${newsId}/chat/`, { signal }).then(({ data }) => data)
 }
 
-export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal, modelConfigId, consent }: SuggestedQuestionsOptions = {}): Promise<unknown> {
+export function fetchSuggestedQuestions(newsId: NewsId, { force = false, signal, modelConfigId, consent, executionSource }: SuggestedQuestionsOptions = {}): Promise<unknown> {
   if (!force) {
     return api.get<unknown>(`/news/${newsId}/suggested-questions/`, {
       params: modelConfigId ? { model_config_id: modelConfigId } : undefined, signal,
     }).then(({ data }) => data)
   }
   if (modelConfigId && consent !== true) throw new TypeError('Explicit suggestion billing consent required')
-  return api.post<unknown>(`/news/${newsId}/suggested-questions/`,
-    modelConfigId ? { model_config_id: modelConfigId, consent: true } : null,
-    { params: { force: 1 }, signal },
-  ).then(({ data }) => data)
+  return api.post<unknown>(`/news/${newsId}/suggested-questions/`, {
+    ...(executionSource ? { execution_source: executionSource } : {}),
+    ...(modelConfigId ? { model_config_id: modelConfigId, consent: true } : {}),
+  }, { params: { force: 1 }, signal }).then(({ data }) => data)
 }
 
 export async function* translateFullArticleStream(
@@ -380,7 +386,7 @@ export async function* translateFullArticleStream(
   } = {},
 ): AsyncGenerator<unknown> {
   const response = await streamingFetch(`/api/news/${id}/translate/`, {
-    body: JSON.stringify({ force }),
+    body: JSON.stringify({ force, execution_source: 'chatgpt_subscription' }),
     signal,
   })
   const jobId = response.headers.get('Job-ID')
@@ -434,10 +440,11 @@ export async function* translateFullArticleStream(
 export async function* chatStream(
   newsId: NewsId,
   question: string,
-  { webSearch = false, modelConfigId, billingConsent = false, turnId, translationResultId, translationMode, signal }: ChatStreamOptions = {},
+  { webSearch = false, modelConfigId, billingConsent = false, turnId, translationResultId, translationMode, executionSource, signal }: ChatStreamOptions = {},
 ): AsyncGenerator<string> {
   const response = await streamingFetch(`/api/news/${newsId}/chat/`, {
     body: JSON.stringify({ question, web_search: webSearch,
+      ...(executionSource ? { execution_source: executionSource } : {}),
       ...(translationMode ? { translation_mode: translationMode } : {}),
       ...(translationResultId !== undefined && translationResultId !== null
         ? { translation_result_id: translationResultId } : {}),
@@ -519,6 +526,13 @@ export function fetchMe(): Promise<unknown> {
 
 // ---- Local ChatGPT subscription ------------------------------------------
 
+export interface ChatGPTSubscriptionResearchTools {
+  status: 'not_tested' | 'supported' | 'unsupported' | 'unknown'
+  model_slug: string | null
+  safe_error_code: string
+  tested_at: string | null
+}
+
 export interface ChatGPTSubscriptionConnection {
   id: string
   account_name: string
@@ -527,6 +541,7 @@ export interface ChatGPTSubscriptionConnection {
   active: boolean
   connected: boolean
   needs_reauth: boolean
+  research_tools: ChatGPTSubscriptionResearchTools
   updated_at: string
 }
 
@@ -545,6 +560,23 @@ export interface ChatGPTSubscriptionModels {
   selected_model: string
 }
 
+function parseChatGPTSubscriptionResearchTools(value: unknown): ChatGPTSubscriptionResearchTools {
+  const statuses = ['not_tested', 'supported', 'unsupported', 'unknown'] as const
+  if (!isRecord(value) || typeof value.status !== 'string' ||
+    !statuses.includes(value.status as (typeof statuses)[number]) ||
+    (value.model_slug !== null && typeof value.model_slug !== 'string') ||
+    typeof value.safe_error_code !== 'string' ||
+    (value.tested_at !== null && typeof value.tested_at !== 'string')) {
+    throw new TypeError('Invalid ChatGPT subscription research capability')
+  }
+  return {
+    status: value.status as ChatGPTSubscriptionResearchTools['status'],
+    model_slug: value.model_slug as string | null,
+    safe_error_code: value.safe_error_code,
+    tested_at: value.tested_at as string | null,
+  }
+}
+
 function parseChatGPTSubscriptionConnection(value: unknown): ChatGPTSubscriptionConnection {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.active !== 'boolean' ||
     typeof value.connected !== 'boolean' || typeof value.needs_reauth !== 'boolean') {
@@ -558,6 +590,7 @@ function parseChatGPTSubscriptionConnection(value: unknown): ChatGPTSubscription
     active: value.active,
     connected: value.connected,
     needs_reauth: value.needs_reauth,
+    research_tools: parseChatGPTSubscriptionResearchTools(value.research_tools),
     updated_at: typeof value.updated_at === 'string' ? value.updated_at : '',
   }
 }
@@ -652,6 +685,19 @@ export function selectChatGPTSubscriptionModel(connectionId: string, slug: strin
 export function disconnectChatGPTSubscription(connectionId: string): Promise<{ disconnected: boolean; revocation_confirmed: boolean }> {
   return api.delete<{ disconnected: boolean; revocation_confirmed: boolean }>(`/chatgpt-subscription/connections/${connectionId}/`).then(({ data }) => data)
 }
+export async function probeChatGPTSubscriptionResearch(
+  connectionId: string,
+): Promise<ChatGPTSubscriptionResearchTools> {
+  const value: unknown = (await apiLong.post<unknown>(
+    `/chatgpt-subscription/connections/${connectionId}/research-probe/`,
+    { consent: true },
+  )).data
+  if (!isRecord(value)) throw new TypeError('Invalid ChatGPT research capability response')
+  return parseChatGPTSubscriptionResearchTools({
+    ...value,
+    tested_at: value.created_at,
+  })
+}
 
 
 export function getChatGPTTranslationTask(jobId: string, signal?: AbortSignal): Promise<unknown> {
@@ -683,24 +729,35 @@ export async function* createResearchStream(
     signal,
     onSessionId,
     onRunId,
+    executionSource,
     modelConfigId,
     consent,
   }: ResearchStreamOptions = {},
 ): AsyncGenerator<unknown> {
-  const hasModelConfigId = modelConfigId !== undefined
-  const hasConsent = consent !== undefined
-  if (
-    hasModelConfigId !== hasConsent
-    || (hasModelConfigId && (typeof modelConfigId !== 'string' || !modelConfigId.trim() || consent !== true))
-  ) {
-    throw new TypeError('Research BYOK requests require an explicit model and literal consent')
+  const hasAuthorization = executionSource !== undefined || modelConfigId !== undefined || consent !== undefined
+  const validAuthorization = (
+    executionSource === 'byok'
+    && typeof modelConfigId === 'string'
+    && Boolean(modelConfigId.trim())
+    && consent === true
+  ) || (
+    executionSource === 'chatgpt_subscription'
+    && modelConfigId === undefined
+    && consent === true
+  )
+  if (hasAuthorization && !validAuthorization) {
+    throw new TypeError('Research requests require one explicit source and literal consent')
   }
 
   const response = await streamingFetch('/api/research/', {
     body: JSON.stringify({
       query,
       local_only: localOnly,
-      ...(hasModelConfigId ? { model_config_id: modelConfigId, consent: true } : {}),
+      ...(hasAuthorization ? {
+        execution_source: executionSource,
+        ...(executionSource === 'byok' ? { model_config_id: modelConfigId } : {}),
+        consent: true,
+      } : {}),
     }),
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,
@@ -727,15 +784,34 @@ export async function* createResearchStream(
 export async function* researchChatStream(
   sessionId: string,
   query: string,
-  { localOnly = false, idempotencyKey, signal, onRunId, modelConfigId, consent }: ResearchChatStreamOptions = {},
+  {
+    localOnly = false, idempotencyKey, signal, onRunId,
+    executionSource, modelConfigId, consent,
+  }: ResearchChatStreamOptions = {},
 ): AsyncGenerator<unknown> {
-  const hasAuthorization = modelConfigId !== undefined || consent !== undefined
-  if (hasAuthorization && (typeof modelConfigId !== 'string' || !modelConfigId.trim() || consent !== true)) {
-    throw new TypeError('Research follow-up requires an explicit model and literal consent')
+  const hasAuthorization = executionSource !== undefined || modelConfigId !== undefined || consent !== undefined
+  const validAuthorization = (
+    executionSource === 'byok'
+    && typeof modelConfigId === 'string'
+    && Boolean(modelConfigId.trim())
+    && consent === true
+  ) || (
+    executionSource === 'chatgpt_subscription'
+    && modelConfigId === undefined
+    && consent === true
+  )
+  if (hasAuthorization && !validAuthorization) {
+    throw new TypeError('Research follow-up requires one explicit source and literal consent')
   }
   const response = await streamingFetch(`/api/research/${sessionId}/chat/`, {
-    body: JSON.stringify({ query, local_only: localOnly,
-      ...(hasAuthorization ? { model_config_id: modelConfigId, consent: true } : {}),
+    body: JSON.stringify({
+      query,
+      local_only: localOnly,
+      ...(hasAuthorization ? {
+        execution_source: executionSource,
+        ...(executionSource === 'byok' ? { model_config_id: modelConfigId } : {}),
+        consent: true,
+      } : {}),
     }),
     headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
     signal,

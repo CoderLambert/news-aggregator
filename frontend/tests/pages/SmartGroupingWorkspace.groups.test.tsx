@@ -39,7 +39,7 @@ function defaults(path: string, options?: Options): unknown {
 beforeEach(() => {
   handler = defaults
   request.mockReset().mockImplementation(async <T,>(path: string, options?: Options) => await handler(path, options) as T)
-  vi.mocked(listAITaskPreferences).mockReset().mockResolvedValue({ revision: 2, preferences: [{ task_kind: 'default', selection_state: 'available', model_config_id: 'model-1', model: { display_name: 'Saved model', model_id: 'saved' } }] } as Awaited<ReturnType<typeof listAITaskPreferences>>)
+  vi.mocked(listAITaskPreferences).mockReset().mockResolvedValue({ revision: 2, preferences: [{ task_kind: 'default', selection_source: 'byok', selection_state: 'available', model_config_id: 'model-1', model: { display_name: 'Saved model', model_id: 'saved' } }], subscription: { state: 'not_connected', model_id: null, display_name: null, research_eligible: false } } as Awaited<ReturnType<typeof listAITaskPreferences>>)
 })
 afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()) })
 async function setup() {
@@ -334,7 +334,8 @@ it.each(['uncheck', 'mode-off'] as const)('revokes saved background AI without a
     if (path.endsWith('/settings/')) { if (options?.method === 'PATCH') saved = { ...saved, ...options.body as object }; return saved }
     return defaults(path, options)
   }
-  vi.mocked(listAITaskPreferences).mockResolvedValue({ revision: 3, preferences: [] })
+  vi.mocked(listAITaskPreferences).mockResolvedValue({ revision: 3, preferences: [],
+    subscription: { state: 'not_connected', model_id: null, display_name: null, research_eligible: false } })
   await setup()
   const ai = screen.getByRole('checkbox', { name: '后台 AI 生成待确认建议' })
   expect(ai).toBeChecked()

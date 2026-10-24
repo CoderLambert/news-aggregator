@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useQuery } from '@tanstack/react-query'
 import { LogIn } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useAuth } from '@/context/AuthContext'
 import type { AuthUser } from '@/context/AuthContext'
 import { useResearch } from '@/hooks/useResearch'
@@ -14,7 +15,7 @@ import type { ResearchCreateAuthorization } from '@/services/researchApi'
 
 interface ResearchPanelProps {
   onClose: () => void
-  byokCreateOnly?: boolean
+  authorizedCreateOnly?: boolean
 }
 
 const TAB_STOP_SELECTOR = [
@@ -57,14 +58,14 @@ function focusDialogEdge(dialog: HTMLElement, edge: 'first' | 'last') {
   dialog.focus()
 }
 
-export default function ResearchPanel({ onClose, byokCreateOnly = false }: ResearchPanelProps) {
+export default function ResearchPanel({ onClose, authorizedCreateOnly = false }: ResearchPanelProps) {
   const { user } = useAuth()
   return (
     <ResearchPanelView
       key={user?.id ?? 'anonymous'}
       user={user}
       onClose={onClose}
-      byokCreateOnly={byokCreateOnly}
+      authorizedCreateOnly={authorizedCreateOnly}
     />
   )
 }
@@ -72,11 +73,11 @@ export default function ResearchPanel({ onClose, byokCreateOnly = false }: Resea
 function ResearchPanelView({
   user,
   onClose,
-  byokCreateOnly,
+  authorizedCreateOnly,
 }: {
   user: AuthUser | null
   onClose: () => void
-  byokCreateOnly: boolean
+  authorizedCreateOnly: boolean
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -103,10 +104,23 @@ function ResearchPanelView({
       && defaultPreference.model?.research_eligible === true
       ? defaultPreference
       : null
-  const preferredModelConfigId = effectiveResearchPreference?.model_config_id ?? null
+  const preferredSource = effectiveResearchPreference?.selection_source === 'byok'
+    || effectiveResearchPreference?.selection_source === 'chatgpt_subscription'
+    ? effectiveResearchPreference.selection_source : null
+  const preferredModelConfigId = preferredSource === 'byok'
+    ? effectiveResearchPreference?.model_config_id ?? null : null
   const preferredModel = effectiveResearchPreference?.model ?? null
-  const hasPersonalSelection = Boolean(researchPreference?.model_config_id
-    || (researchPreference?.selection_state === 'inherit_default' && defaultPreference?.model_config_id))
+  const preferredModelId = preferredSource === 'chatgpt_subscription'
+    ? taskPreferences.data?.subscription.model_id ?? null
+    : preferredModel?.model_id ?? null
+  const hasPersonalSelection = Boolean(
+    researchPreference?.selection_source === 'byok'
+    || researchPreference?.selection_source === 'chatgpt_subscription'
+    || (
+      researchPreference?.selection_state === 'inherit_default'
+      && defaultPreference?.selection_source === 'byok'
+    )
+  )
   const {
     sessions,
     activeSessionId,
@@ -117,6 +131,7 @@ function ResearchPanelView({
     hasRecoverableTask,
     isBusy,
     recoveryAction,
+    recoveryNotice,
     handleSend,
     handleNewSession,
     handleSelectSession,
@@ -124,29 +139,47 @@ function ResearchPanelView({
     handleDisconnect,
     handleResume,
     handleRetry,
-  } = useResearch(user?.id ?? null, { byokCreateOnly })
+  } = useResearch(user?.id ?? null, { authorizedCreateOnly })
 
-  const researchModelConfigId = activeSessionId ? sessionResearchModel?.model_config_id ?? null : preferredModelConfigId
-  const researchModel = activeSessionId ? sessionResearchModel : preferredModel
-  const researchModelUnavailable = !activeSessionId && hasPersonalSelection && !preferredModel
+  const researchSource = activeSessionId
+    ? sessionResearchModel?.source ?? null : preferredSource
+  const researchModelConfigId = researchSource === 'byok'
+    ? activeSessionId
+      ? sessionResearchModel?.model_config_id ?? null
+      : preferredModelConfigId
+    : null
+  const researchModelId = activeSessionId
+    ? sessionResearchModel?.model_id ?? null : preferredModelId
+  const hasResearchModel = Boolean(
+    researchSource && researchModelId
+    && (researchSource === 'chatgpt_subscription' || researchModelConfigId)
+  )
+  const researchModelUnavailable = !activeSessionId && hasPersonalSelection && !hasResearchModel
   const researchModelLabel = activeSessionId
-    ? sessionResearchModel?.model_id ?? null
-    : preferredModel ? preferredModel.display_name === preferredModel.model_id
-      ? preferredModel.display_name : `${preferredModel.display_name} (${preferredModel.model_id})` : null
+    ? researchModelId
+    : preferredSource === 'chatgpt_subscription'
+      ? `ChatGPT 订阅 · ${taskPreferences.data?.subscription.display_name ?? researchModelId ?? ''}`
+      : preferredModel
+        ? preferredModel.display_name === preferredModel.model_id
+          ? preferredModel.display_name : `${preferredModel.display_name} (${preferredModel.model_id})`
+        : null
 
   const billingConsentKey = JSON.stringify([
     user?.id ?? 'anonymous',
-    researchModelConfigId ?? 'no-model',
+    researchSource ?? 'no-source',
+    researchModelConfigId ?? researchModelId ?? 'no-model',
     activeSessionId ?? 'new-research',
   ])
-  if (billingConsentState.key !== billingConsentKey) {
-    setBillingConsentState({ key: billingConsentKey, checked: false })
-  }
   const billingConsent = billingConsentState.key === billingConsentKey && billingConsentState.checked
 
-  const researchAuthorization: ResearchCreateAuthorization | undefined = researchModelConfigId && billingConsent
-    ? { modelConfigId: researchModelConfigId, consent: true }
-    : undefined
+  const researchAuthorization: ResearchCreateAuthorization | undefined =
+    hasResearchModel && billingConsent
+      ? researchSource === 'byok' && researchModelConfigId
+        ? { executionSource: 'byok', modelConfigId: researchModelConfigId, consent: true }
+        : researchSource === 'chatgpt_subscription'
+          ? { executionSource: 'chatgpt_subscription', consent: true }
+          : undefined
+      : undefined
 
   const isLoading = isBusy || phase === 'thinking' || phase === 'tool_calling' || phase === 'streaming'
   // Before receiving a Session-ID, a POST might already have reached Django.
@@ -169,12 +202,12 @@ function ResearchPanelView({
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user || researchModelUnavailable) return
-    if (byokCreateOnly && (recoveryAction === 'retry' || !researchModelConfigId || !researchModel)) return
+    if (authorizedCreateOnly && (recoveryAction === 'retry' || !hasResearchModel)) return
     const submittedInput = input
-    if (researchModelConfigId && !billingConsent) return
+    if (hasResearchModel && !billingConsent) return
     void handleSend(input.trim(), {
       localOnly,
-      ...(researchModelConfigId ? { authorization: researchAuthorization } : {}),
+      ...(researchAuthorization ? { authorization: researchAuthorization } : {}),
     }).then((accepted) => {
       if (accepted) {
         setInput((current) => current === submittedInput ? '' : current)
@@ -183,20 +216,27 @@ function ResearchPanelView({
     })
   }
 
+  function handleRetryQuery() {
+    if (hasResearchModel && !billingConsent) return
+    void handleRetry(researchAuthorization).then((accepted) => {
+      if (accepted) setBillingConsentState({ key: '', checked: false })
+    })
+  }
+
   function handleSuggestionClick(query: string) {
     if (!user) {
       setShowAuthModal(true)
       return
     }
-    if (isBusy || hasRecoverableTask || researchModelUnavailable || (byokCreateOnly && recoveryAction === 'retry')) return
-    if (byokCreateOnly && (!researchModelConfigId || !researchModel)) return
-    if (researchModelConfigId && !billingConsent) {
+    if (isBusy || hasRecoverableTask || researchModelUnavailable || (authorizedCreateOnly && recoveryAction === 'retry')) return
+    if (authorizedCreateOnly && !hasResearchModel) return
+    if (hasResearchModel && !billingConsent) {
       setInput(query)
       return
     }
     void handleSend(query, {
       localOnly: false,
-      ...(researchModelConfigId ? { authorization: researchAuthorization } : {}),
+      ...(researchAuthorization ? { authorization: researchAuthorization } : {}),
     }).then((accepted) => {
       if (accepted) setBillingConsentState({ key: '', checked: false })
     })
@@ -333,9 +373,9 @@ function ResearchPanelView({
             </div>
           ) : (
             <>
-              {byokCreateOnly && activeSessionId && (
+              {authorizedCreateOnly && activeSessionId && (
                 <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
-                  续问使用会话原模型，不能更换供应商。每次发送前请重新确认服务商计费；旧会话缺少安全续接记录时，请新建研究。
+                  续问使用会话原模型来源，不能切换账号或供应商。每次发送前请重新确认对应额度或费用；旧会话缺少安全续接记录时，请新建研究。
                 </div>
               )}
               {researchModelUnavailable && (
@@ -343,12 +383,12 @@ function ResearchPanelView({
                   所选模型尚未完成研究所需的文本与工具能力验证，或连接已失效。请到 AI 设置检查；不会自动改用其他模型。
                 </div>
               )}
-              {byokCreateOnly && !activeSessionId && (!researchModelConfigId || !researchModel) && (
+              {authorizedCreateOnly && !activeSessionId && !hasResearchModel && (
                 <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
-                  请先到 AI 设置中配置并验证支持工具调用的个人研究模型，再返回开始研究。
+                  请先到 AI 设置中配置并验证支持工具调用的个人模型或 ChatGPT 订阅模型，再返回开始研究。
                 </div>
               )}
-              {researchModelConfigId && researchModel && !hasRecoverableTask && (
+              {hasResearchModel && researchModelLabel && !hasRecoverableTask && (
                 <section
                   aria-labelledby="research-model-consent-title"
                   className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-relaxed"
@@ -359,19 +399,23 @@ function ResearchPanelView({
                     {!activeSessionId && researchPreference?.selection_state === 'inherit_default' ? '（已保存的个人默认模型）' : ''}
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    使用已保存的模型；发送的问题和相关内容由该服务商处理。
+                    {researchSource === 'chatgpt_subscription'
+                      ? '发送的问题和相关内容由当前 ChatGPT 订阅模型处理，可能使用订阅额度。'
+                      : '发送的问题和相关内容由已保存模型的服务商处理，可能产生服务商费用。'}
                   </p>
                   <label className="mt-2 flex cursor-pointer items-start gap-2 text-foreground">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={billingConsent}
                       onChange={(event) => setBillingConsentState({
                         key: billingConsentKey,
                         checked: event.currentTarget.checked,
                       })}
-                      className="mt-0.5 accent-primary"
+                      aria-label="同意本次研究调用"
+                      className="mt-0.5"
                     />
-                    <span>同意本次发送内容及服务商可能产生的费用。</span>
+                    <span>{researchSource === 'chatgpt_subscription'
+                      ? '同意本次发送内容并使用 ChatGPT 订阅额度。'
+                      : '同意本次发送内容及服务商可能产生的费用。'}</span>
                   </label>
                 </section>
               )}
@@ -383,28 +427,36 @@ function ResearchPanelView({
                 onSuggestionClick={handleSuggestionClick}
                 disabled={isBusy}
               />
-              {recoveryAction === 'resume' && !(byokCreateOnly && !activeSessionId) && (
+              {recoveryAction === 'resume' && !(authorizedCreateOnly && !activeSessionId) && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
-                  <span>{byokCreateOnly ? '只会读取此会话已有任务事件；若任务仍在排队，不会重新派发模型任务。' : !activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
+                  <span>{authorizedCreateOnly ? '只会读取此会话已有任务事件；若任务仍在排队，不会重新派发模型任务。' : !activeSessionId ? '原请求可能已到达服务器。继续接收将复用原请求标识，避免创建新的重复任务；暂时无法确认后台是否已经开始。' : '浏览器连接已停止；后台任务可能仍在执行。重新连接会回放当前任务的事件。'}</span>
                   <Button type="button" size="sm" variant="outline" onClick={() => void handleResume()}>
                     继续接收
                   </Button>
                 </div>
               )}
-              {byokCreateOnly && recoveryAction === 'resume' && !activeSessionId && (
+              {authorizedCreateOnly && recoveryAction === 'resume' && !activeSessionId && (
                 <div role="status" className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-200">
                   原请求尚未确认对应会话。为避免重新派发或重复计费，此模式不会重放新建请求；可先从历史会话中查看已保存结果。
                 </div>
               )}
-              {byokCreateOnly && recoveryAction === 'retry' && (
+              {authorizedCreateOnly && recoveryAction === 'retry' && (
                 <div role="status" className="rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
-                  上次结果尚未确认。此模式不自动重试；请先查看历史会话，或在新研究中重新选择模型并确认费用。
+                  上次结果尚未确认。此模式不自动重试；请先查看历史会话，或在新研究中重新选择模型并确认额度或费用。
                 </div>
               )}
-              {recoveryAction === 'retry' && !byokCreateOnly && (
+              {recoveryAction === 'retry' && !authorizedCreateOnly && (
                 <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-200">
-                  <span>原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。</span>
-                  <Button type="button" size="sm" variant="outline" onClick={() => void handleRetry()}>
+                  <span>{activeSessionId && recoveryNotice
+                    ? `${recoveryNotice} 重新研究会创建新任务，可能重复计算或产生费用。`
+                    : '原请求可能已到达服务器。只有点击下方按钮才会新建任务，可能重复计算或产生费用。'}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRetryQuery}
+                    disabled={hasResearchModel && !billingConsent}
+                  >
                     重新研究
                   </Button>
                 </div>
@@ -419,9 +471,10 @@ function ResearchPanelView({
           onSend={user ? handleSendQuery : () => setShowAuthModal(true)}
           onCancel={handleCancel}
           isLoading={isLoading}
+          loginRequired={!user}
           disabled={!user || hasRecoverableTask || researchModelUnavailable
-            || (byokCreateOnly && (recoveryAction === 'retry' || !researchModelConfigId || !researchModel))
-            || (Boolean(researchModelConfigId) && !billingConsent)}
+            || (authorizedCreateOnly && (recoveryAction === 'retry' || !hasResearchModel))
+            || (hasResearchModel && !billingConsent)}
           localOnly={localOnly}
           onToggleLocalOnly={() => setLocalOnly((enabled) => !enabled)}
         />

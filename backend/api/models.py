@@ -605,6 +605,43 @@ class ChatGPTSubscriptionConnection(models.Model):
         return bool(self.encrypted_access_token and self.encrypted_refresh_token and not self.needs_reauth)
 
 
+class ChatGPTSubscriptionCapabilityReceipt(models.Model):
+    """Immutable, secret-free proof for one subscription model capability probe."""
+
+    STATUS_CHOICES = [
+        ('supported', '支持'),
+        ('unsupported', '不支持'),
+        ('unknown', '未知'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    connection = models.ForeignKey(
+        ChatGPTSubscriptionConnection, on_delete=models.CASCADE,
+        related_name='capability_receipts',
+    )
+    model_slug = models.CharField(max_length=255)
+    connection_generation = models.PositiveIntegerField()
+    credential_generation = models.PositiveIntegerField()
+    capability = models.CharField(max_length=32, default='tools')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES)
+    safe_error_code = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=['connection', 'model_slug', '-created_at'],
+                name='chatgpt_cap_model_created',
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(capability='tools'),
+                name='chatgpt_capability_tools_only',
+            ),
+        ]
+
+
 class ChatGPTAuthAttempt(models.Model):
     """Short-lived, one-use OAuth state and encrypted PKCE verifier."""
 
@@ -1162,7 +1199,7 @@ class ResearchRun(models.Model):
     # Older queued rows have no input and must never be guessed or replayed.
     queued_query = models.TextField(default='', blank=True)
     queued_local_only = models.BooleanField(default=False)
-    # Secret-free T03 model + T01 credential fence captured for explicit T09 BYOK runs.
+    # Secret-free model and authorization fence captured for explicit research runs.
     execution_snapshot = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='queued', db_index=True)
     run_token = models.UUIDField(null=True, blank=True)

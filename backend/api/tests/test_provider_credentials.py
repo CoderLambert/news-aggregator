@@ -141,7 +141,7 @@ def test_chatgpt_subscription_works_even_with_enabled_unbound_byok_connection(ow
         patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=selected),
         patch('api.services.ai_execution.personal_clients_for_user',
               side_effect=AssertionError('unbound BYOK must not shadow subscription')) as byok,
-        patch('api.services.chatgpt_subscription.stream_chat_response',
+        patch('api.services.chatgpt_subscription_llm.stream_chat_response',
               return_value=iter(['subscription synthetic answer'])) as subscription,
         patch('api.views.get_clients',
               side_effect=AssertionError('no site-Key fallback')) as site,
@@ -153,3 +153,60 @@ def test_chatgpt_subscription_works_even_with_enabled_unbound_byok_connection(ow
     subscription.assert_called_once()
     byok.assert_not_called()
     site.assert_not_called()
+
+
+@pytest.mark.django_db
+@override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+def test_explicit_subscription_source_never_falls_through_to_byok(owner):
+    from api.models import Category, News, Source
+    from api.tests.rss.reader_fixtures import public_legacy_article
+    from django.utils import timezone
+
+    article = public_legacy_article(News.objects.create(
+        title='Explicit Subscription', content='summary', full_content='complete',
+        full_content_state='legacy', publish_time=timezone.now(),
+        url='https://example.test/explicit-subscription',
+        source=Source.objects.create(
+            name='Explicit Source', url='https://example.test/explicit', language='en',
+        ),
+        category=Category.objects.create(
+            name='Explicit Category', slug='explicit-subscription',
+        ),
+    ))
+    UserAIConnection.objects.create(
+        user=owner, provider_id='deepseek', endpoint_profile='deepseek_default',
+        display_name='must-not-fallback', request_hash='synthetic-only',
+        credential_ciphertext='synthetic-not-a-key', is_enabled=True,
+    )
+    client = APIClient()
+    client.force_authenticate(user=owner)
+    with (
+        patch('api.services.chatgpt_subscription.active_connection_for_user', return_value=None),
+        patch(
+            'api.services.ai_execution.personal_clients_for_user',
+            side_effect=AssertionError('explicit subscription must not call BYOK'),
+        ) as byok,
+    ):
+        chat = client.post(
+            f'/api/news/{article.pk}/chat/',
+            {'question': 'Explain', 'execution_source': 'chatgpt_subscription'},
+            format='json',
+        )
+        suggestions = client.post(
+            f'/api/news/{article.pk}/suggested-questions/?force=1',
+            {'execution_source': 'chatgpt_subscription'},
+            format='json',
+        )
+        translation = client.post(
+            f'/api/news/{article.pk}/translate/',
+            {'execution_source': 'chatgpt_subscription', 'force': False},
+            format='json',
+        )
+
+    assert chat.status_code == 409
+    assert chat.data['error_code'] == 'provider_credential_required'
+    assert suggestions.status_code == 200
+    assert suggestions.data['generated'] is False
+    assert suggestions.data['generation'] == 'unconfigured'
+    assert '连接 ChatGPT 订阅账号' in b''.join(translation.streaming_content).decode()
+    byok.assert_not_called()

@@ -97,11 +97,11 @@ beforeEach(() => {
 describe('ResearchPanel', () => {
   it.each([false, undefined, 'true'])('does not inherit a text-only or unproven default into research (%s)', async eligible => {
     taskPreferenceApi.listAITaskPreferences.mockResolvedValue({ revision: 1, preferences: [
-      { task_kind: 'deep_research', model_config_id: null, selection_state: 'inherit_default', model: null },
-      { task_kind: 'default', model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f', selection_state: 'available',
+      { task_kind: 'deep_research', selection_source: 'inherit', model_config_id: null, selection_state: 'inherit_default', model: null },
+      { task_kind: 'default', selection_source: 'byok', model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f', selection_state: 'available',
         model: { id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f', display_name: 'Text only',
           model_id: 'minimax-m3.1-flash', research_eligible: eligible } },
-    ] })
+    ], subscription: { state: 'not_connected', model_id: null, display_name: null, research_eligible: false } })
     renderPanel()
     await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
     expect(await screen.findByText(/研究所需的文本与工具能力验证/)).toBeInTheDocument()
@@ -116,6 +116,7 @@ describe('ResearchPanel', () => {
       revision: 3,
       preferences: [{
         task_kind: 'deep_research',
+        selection_source: 'byok',
         model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
         selection_state: 'available',
         model: {
@@ -125,6 +126,7 @@ describe('ResearchPanel', () => {
           display_name: 'Personal Research',
         },
       }],
+      subscription: { state: 'not_connected', model_id: null, display_name: null, research_eligible: false },
     })
     api.createResearchStream.mockImplementation(async function* (_query, options) {
       options.onSessionId?.('byok-research-session')
@@ -151,15 +153,126 @@ describe('ResearchPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
     expect(api.createResearchStream.mock.calls[0][1].authorization).toEqual({
+      executionSource: 'byok',
       modelConfigId: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
       consent: true,
     })
+  })
+
+  it('uses an eligible ChatGPT subscription for research with per-run quota consent', async () => {
+    taskPreferenceApi.listAITaskPreferences.mockResolvedValue({
+      revision: 4,
+      preferences: [{
+        task_kind: 'deep_research',
+        selection_source: 'chatgpt_subscription',
+        model_config_id: null,
+        selection_state: 'available',
+        model: null,
+      }],
+      subscription: {
+        state: 'available',
+        model_id: 'gpt-subscription-research',
+        display_name: 'gpt-subscription-research',
+        research_eligible: true,
+      },
+    })
+    api.createResearchStream.mockImplementation(async function* (_query, options) {
+      options.onSessionId?.('subscription-research-session')
+      yield { type: 'session_created', session_id: 'subscription-research-session' }
+      yield { type: 'complete' }
+    })
+
+    renderPanel('/', false, signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }))
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    expect(await screen.findByText(/ChatGPT 订阅 · gpt-subscription-research/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '输入研究问题' })).not.toHaveAttribute('placeholder', '请先登录')
+    expect(screen.getByText(/可能使用订阅额度/)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
+      target: { value: '使用订阅执行研究' },
+    })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
+    expect(api.createResearchStream.mock.calls[0][1].authorization).toEqual({
+      executionSource: 'chatgpt_subscription',
+      consent: true,
+    })
+  })
+
+  it('shows a durable terminal research error instead of an ambiguous delivery warning', async () => {
+    api.createResearchStream.mockImplementation(async function* terminalFailure() {
+      yield { type: 'session_created', session_id: 'subscription-terminal-error' }
+      yield { type: 'error', message: 'ChatGPT 订阅模型暂时无法完成研究，请稍后明确重试。' }
+    })
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    fireEvent.click(await screen.findByRole('button', { name: '分析 AI 芯片竞争格局' }))
+
+    const terminalMessage = await screen.findByText(/ChatGPT 订阅模型暂时无法完成研究，请稍后明确重试。/)
+    const status = terminalMessage.closest('[role="status"]')
+    expect(status).not.toBeNull()
+    expect(status).toHaveTextContent('ChatGPT 订阅模型暂时无法完成研究，请稍后明确重试。')
+    expect(status).not.toHaveTextContent('原请求可能已到达服务器')
+    expect(screen.getByRole('button', { name: '重新研究' })).toBeInTheDocument()
+  })
+
+  it('requires fresh subscription consent before retrying a failed follow-up', async () => {
+    const history = {
+      ...completedSession(),
+      research_model: {
+        source: 'chatgpt_subscription',
+        model_config_id: null,
+        model_id: 'gpt-6-luna',
+      },
+    }
+    api.listResearchSessions.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: history.id, title: history.title }],
+    })
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    api.researchChatStream
+      .mockImplementationOnce(async function* terminalFailure() {
+        yield { type: 'error', message: '订阅研究暂时失败，请稍后重试。' }
+      })
+      .mockImplementationOnce(async function* successfulRetry() {
+        yield { type: 'text_delta', text: '重试后的完整回答' }
+        yield { type: 'complete' }
+      })
+
+    renderPanel()
+    fireEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByText('本次研究模型：gpt-6-luna')
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
+      target: { value: '继续分析' },
+    })
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+
+    const retry = await screen.findByRole('button', { name: '重新研究' })
+    expect(retry).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox'))
+    expect(retry).toBeEnabled()
+    await userEvent.click(retry)
+
+    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledTimes(2))
+    expect(api.researchChatStream.mock.calls[1][2].authorization).toEqual({
+      executionSource: 'chatgpt_subscription',
+      consent: true,
+    })
+    expect(await screen.findByText('重试后的完整回答')).toBeInTheDocument()
   })
 
   it('sends a consented follow-up using the stored session model without requiring current preferences', async () => {
     const history = {
       ...completedSession(),
       research_model: {
+        source: 'byok',
         model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
         model_id: 'deepseek-chat',
       },
@@ -187,6 +300,7 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledTimes(1))
     expect(api.researchChatStream.mock.calls[0][0]).toBe(history.id)
     expect(api.researchChatStream.mock.calls[0][2].authorization).toEqual({
+      executionSource: 'byok',
       modelConfigId: history.research_model.model_config_id, consent: true,
     })
     expect(api.createResearchStream).not.toHaveBeenCalled()
@@ -202,7 +316,7 @@ describe('ResearchPanel', () => {
     )
     await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
 
-    expect(await screen.findByText(/配置并验证支持工具调用的个人研究模型/)).toBeInTheDocument()
+    expect(await screen.findByText(/个人模型或 ChatGPT 订阅模型/)).toBeInTheDocument()
     const input = screen.getByRole('textbox', { name: '输入研究问题' })
     fireEvent.change(input, { target: { value: '需要验证模型' } })
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()

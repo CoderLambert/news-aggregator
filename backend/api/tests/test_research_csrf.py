@@ -80,7 +80,7 @@ def test_research_create_uses_standard_session_auth_and_valid_secure_csrf_withou
     client = APIClient(enforce_csrf_checks=True)
     client.force_login(user)
     token = _csrf_token(client)
-    with patch('api.services.chatgpt_subscription_jobs.submit_background_task') as submit_task:
+    with patch('api.services.research.job_manager.submit_research_task') as submit_task:
         response = _secure_post(client, '/api/research/', {'query': 'offline test'}, token)
 
     assert response.status_code == 200
@@ -101,7 +101,7 @@ def test_research_cancel_is_owner_scoped_csrf_protected_and_terminal_idempotent(
     client.force_login(user)
     token = _csrf_token(client)
 
-    with patch('api.services.chatgpt_subscription_jobs.submit_background_task'):
+    with patch('api.services.research.job_manager.submit_research_task'):
         created = _secure_post(client, '/api/research/', {'query': 'cancel offline'}, token)
     session_id = created['Session-ID']
     run_id = created['Run-ID']

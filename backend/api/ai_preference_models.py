@@ -12,6 +12,12 @@ TASK_KINDS = (
     'deep_research', 'question_suggestions',
 )
 
+SELECTION_SOURCES = (
+    'unset', 'inherit', 'byok', 'chatgpt_subscription',
+)
+
+
+
 
 class UserAITaskPreference(models.Model):
     user = models.ForeignKey(
@@ -20,6 +26,10 @@ class UserAITaskPreference(models.Model):
     )
     task_kind = models.CharField(
         max_length=32, choices=[(kind, kind) for kind in TASK_KINDS],
+    )
+    selection_source = models.CharField(
+        max_length=32, choices=[(source, source) for source in SELECTION_SOURCES],
+        default='inherit',
     )
     model_config = models.ForeignKey(
         'api.UserAIModelConfig', null=True, blank=True,
@@ -35,5 +45,22 @@ class UserAITaskPreference(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['user', 'task_kind'], name='user_ai_task_preference_unique',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(selection_source='byok', model_config__isnull=False)
+                    | models.Q(
+                        selection_source__in=('unset', 'inherit', 'chatgpt_subscription'),
+                        model_config__isnull=True,
+                    )
+                ),
+                name='user_ai_task_preference_source_model',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(task_kind='default', selection_source__in=('unset', 'byok'))
+                    | ~models.Q(task_kind='default')
+                ),
+                name='user_ai_task_preference_default_source',
             ),
         ]

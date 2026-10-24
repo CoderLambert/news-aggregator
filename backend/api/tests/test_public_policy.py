@@ -444,8 +444,8 @@ def test_closed_signup_returns_fixed_error_without_creating_user():
     PUBLIC_SITE_MODE="full",
     PUBLIC_SIGNUP_ENABLED=True,
     PUBLIC_AI_ENABLED=False,
-    CHATGPT_AUTH_MODE="local_oss",
-    CHATGPT_PLAN_USAGE_ENABLED=True,
+    CHATGPT_AUTH_MODE="disabled",
+    CHATGPT_PLAN_USAGE_ENABLED=False,
 )
 def test_ai_disabled_rejects_only_frozen_expensive_methods_before_dispatch(
     news_obj, monkeypatch

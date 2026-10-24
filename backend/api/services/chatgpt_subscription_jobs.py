@@ -29,8 +29,8 @@ from api.services.chatgpt_subscription import (
     SubscriptionError,
     save_completed_translation,
     source_hash,
-    stream_full_translation,
 )
+from api.services.chatgpt_subscription_llm import stream_full_translation
 from api.services.shared_translations import (
     SharedTranslationError,
     LEASE_TTL as SHARED_LEASE_TTL,
@@ -46,12 +46,12 @@ TASK_HEARTBEAT_SECONDS = 20
 TERMINAL_STATUSES = frozenset({'succeeded', 'failed', 'cancelled', 'interrupted'})
 RESTART_ERROR = '任务已重新开始，请重新连接。'
 GENERATION_CHANGED_MESSAGE = '任务已重新开始，请刷新后重试。'
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='chatgpt-translation')
+_translation_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='ai-translation')
 
 
-def submit_background_task(function, *args, **kwargs):
-    """Submit one private background task to the shared two-worker executor."""
-    return _executor.submit(function, *args, **kwargs)
+def submit_translation_task(function, *args, **kwargs):
+    """Submit translation work without sharing capacity with research runs."""
+    return _translation_executor.submit(function, *args, **kwargs)
 _legacy_jobs: dict[tuple, ChatGPTTranslationJob] = {}
 # Legacy test fixture name; durable job state never depends on this mapping.
 _jobs = _legacy_jobs
@@ -594,7 +594,11 @@ def _dispatch_task(task_id, generation):
             return
         _dispatching.add(key)
     try:
-        _executor.submit(_run_persistent_task, task_id, generation)
+        future = submit_translation_task(_run_persistent_task, task_id, generation)
+        logger.info(
+            'ChatGPT translation dispatch submitted (task_id=%s, generation=%s, running=%s, done=%s).',
+            task_id, generation, future.running(), future.done(),
+        )
     except Exception as exc:
         with _jobs_lock:
             _dispatching.discard(key)
@@ -817,6 +821,14 @@ def _mark_failed(task_id, generation, run_token, exc):
 def _claim_persistent_task(task_id, generation, run_token):
     def persist():
         with transaction.atomic():
+            # Reserve SQLite's single writer before taking the validation
+            # snapshot. A read-first transaction cannot be upgraded after a
+            # competing WAL commit and fails immediately with BUSY_SNAPSHOT.
+            reserved = ChatGPTTranslationTask.objects.filter(
+                pk=task_id, generation=generation, status='queued',
+            ).update(updated_at=F('updated_at'))
+            if not reserved:
+                return 0
             queued_task = _queued_task_snapshot(task_id, generation)
             if queued_task is None:
                 return 0
@@ -835,8 +847,7 @@ def _claim_persistent_task(task_id, generation, run_token):
                 connection__encrypted_access_token__gt='',
                 connection__encrypted_refresh_token__gt='',
                 news__full_content=queued_task.news.full_content,
-                news__full_content__gt='',
-                news__full_content_state__in=['legacy', 'complete'],
+                news__full_content_state=queued_task.news.full_content_state,
             ).update(
                 status='running', run_token=run_token, provider_started=False,
                 started_at=now, lease_expires_at=now + TASK_LEASE_TTL,
@@ -846,6 +857,10 @@ def _claim_persistent_task(task_id, generation, run_token):
 
 
 def _run_persistent_task(task_id, generation):
+    logger.info(
+        'ChatGPT translation worker started (task_id=%s, generation=%s).',
+        task_id, generation,
+    )
     close_old_connections()
     key = (str(task_id), int(generation))
     run_token = uuid.uuid4()

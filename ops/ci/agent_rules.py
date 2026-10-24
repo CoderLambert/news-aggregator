@@ -22,8 +22,8 @@ RULE_PATHS = (
     'tests/AGENTS.md', 'scripts/deploy/AGENTS.md',
 )
 SKILL_NAMES = (
-    'newshub-impact-analysis', 'newshub-verify', 'newshub-pr-handoff',
-    'newshub-stage-commit',
+    'newshub-impact-analysis', 'newshub-verify', 'newshub-test-acceptance',
+    'newshub-pr-handoff', 'newshub-stage-commit',
 )
 # Project budgets leave room for the user's own instructions. They are NOT
 # Codex's configured limits and don't measure actual token use.

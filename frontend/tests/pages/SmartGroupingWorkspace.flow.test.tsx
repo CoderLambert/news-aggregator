@@ -53,7 +53,8 @@ async function generate() {
   await waitFor(() => expect(screen.getByRole('button', { name: '确认应用分组' })).toBeEnabled())
 }
 beforeEach(() => {
-  vi.mocked(listAITaskPreferences).mockReset().mockResolvedValue({ revision: 0, preferences: [] })
+  vi.mocked(listAITaskPreferences).mockReset().mockResolvedValue({ revision: 0, preferences: [],
+    subscription: { state: 'not_connected', model_id: null, display_name: null, research_eligible: false } })
   handler = defaults
   request.mockReset()
   request.mockImplementation(async <T,>(path: string, options?: Options): Promise<T> => await handler(path, options) as T)
@@ -251,9 +252,11 @@ describe('AG-04 guided grouping', () => {
 it('binds an explicitly consented AI preview to the displayed verified default model', async () => {
   const id = '20adf7e7-44d7-4444-8888-105a61db3141'
   vi.mocked(listAITaskPreferences).mockResolvedValue({ revision: 3, preferences: [{
-    task_kind: 'default', selection_state: 'available', model_config_id: id,
+    task_kind: 'default', selection_source: 'byok', selection_state: 'available', model_config_id: id,
     model: { id, connection_id: 'synthetic', model_id: 'deepseek-chat', display_name: '我的分类模型' },
-  }] })
+  }], subscription: {
+    state: 'not_connected', model_id: null, display_name: null, research_eligible: false,
+  } })
   setup(undefined, 1, true)
   fireEvent.click(screen.getByRole('button', { name: 'AI 精细分类' }))
   await screen.findByText(/本次分类模型：我的分类模型/)

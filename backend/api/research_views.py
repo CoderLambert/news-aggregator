@@ -110,8 +110,8 @@ def _stream_response(run, session_id=None):
 
 def _run_error_response(exc):
     payload = {'error': exc.message, 'error_code': exc.error_code}
-    # Only a failed new-run model admission certifies no run was created.
-    # A generic conflict/timeout may still have an existing queued/running run.
+    # A certified admission failure means this request created no run.
+    # Generic conflicts/timeouts remain uncertain because work may exist.
     if exc.request_rejected:
         payload['request_state'] = 'rejected'
     response = Response(
@@ -129,39 +129,54 @@ def _request_data(request):
         return None, None, Response({'error': 'query is required'}, status=status.HTTP_400_BAD_REQUEST)
     return query.strip(), bool(request.data.get('local_only', False)), None
 
-def _byok_create_values(request, *, allowed):
+def _research_authorization_values(request, *, allowed):
     body = request.data
     if not hasattr(body, 'get'):
-        return None, None, _no_store(Response({'error': 'invalid request'}, status=400))
-    has_model = 'model_config_id' in body
-    has_consent = 'consent' in body
-    if not has_model and not has_consent:
-        return None, None, None
-    if not allowed:
-        return None, None, _no_store(Response(
-            {'error': 'Explicit model authorization is required for this research run.',
-             'error_code': 'research_byok_create_only'}, status=400,
-        ))
+        return None, None, None, _no_store(Response({'error': 'invalid request'}, status=400))
+    source = body.get('execution_source')
     model_config_id = body.get('model_config_id')
-    if body.get('consent') is not True or type(model_config_id) is not str or len(model_config_id) != 36:
-        return None, None, _no_store(Response(
-            {'error': 'Select a verified personal research model and explicitly approve provider billing.',
+    consent = body.get('consent')
+    has_authorization = any(
+        key in body for key in ('execution_source', 'model_config_id', 'consent')
+    )
+    if not has_authorization:
+        return None, None, None, None
+    if not allowed:
+        return None, None, None, _no_store(Response(
+            {'error': 'Explicit model authorization is required for this research run.',
+             'error_code': 'research_authorized_create_only'}, status=400,
+        ))
+    valid = (
+        source == 'byok'
+        and consent is True
+        and type(model_config_id) is str
+        and len(model_config_id) == 36
+    ) or (
+        source == 'chatgpt_subscription'
+        and consent is True
+        and model_config_id is None
+    )
+    if not valid:
+        return None, None, None, _no_store(Response(
+            {'error': 'Select a verified research source and explicitly approve this call.',
              'error_code': 'research_consent_required'}, status=400,
         ))
-    if set(body.keys()) - {'query', 'local_only', 'model_config_id', 'consent'}:
-        return None, None, _no_store(Response(
+    if set(body.keys()) - {
+        'query', 'local_only', 'execution_source', 'model_config_id', 'consent',
+    }:
+        return None, None, None, _no_store(Response(
             {'error': 'Unsupported research request fields.', 'error_code': 'invalid_research_request'},
             status=400,
         ))
-    return model_config_id, True, None
+    return source, model_config_id, True, None
 
 
-def _submit_response(request, *, session_id=None, allow_byok_create=False):
+def _submit_response(request, *, session_id=None, allow_authorized_create=False):
     query, local_only, error = _request_data(request)
     if error is not None:
         return _no_store(error)
-    model_config_id, consent, error = _byok_create_values(
-        request, allowed=allow_byok_create,
+    execution_source, model_config_id, consent, error = _research_authorization_values(
+        request, allowed=allow_authorized_create,
     )
     if error is not None:
         return error
@@ -170,6 +185,7 @@ def _submit_response(request, *, session_id=None, allow_byok_create=False):
         session, run = job_manager.submit_research_run(
             request.user, session_id=session_id, query=query,
             local_only=local_only, idempotency_key=raw_key,
+            execution_source=execution_source,
             model_config_id=model_config_id, consent=consent,
         )
     except job_manager.ResearchRunError as exc:
@@ -182,7 +198,7 @@ def _submit_response(request, *, session_id=None, allow_byok_create=False):
 @authentication_classes([SessionAuthentication])
 def research_create(request):
     """Create a new first-run session; request closure never cancels its run."""
-    return _submit_response(request, allow_byok_create=True)
+    return _submit_response(request, allow_authorized_create=True)
 
 
 @api_view(['POST'])
@@ -192,7 +208,7 @@ def research_chat(request, pk):
     """Create/attach a follow-up run in an owner-scoped session."""
     if not _user_sessions(request.user).filter(pk=pk).exists():
         return _no_store(Response({'error': 'Session not found'}, status=status.HTTP_404_NOT_FOUND))
-    return _submit_response(request, session_id=pk, allow_byok_create=True)
+    return _submit_response(request, session_id=pk, allow_authorized_create=True)
 
 
 @api_view(['GET'])

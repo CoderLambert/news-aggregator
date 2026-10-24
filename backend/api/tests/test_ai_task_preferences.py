@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 
 from api.ai_model_models import AIModelProbeAttempt, UserAIModelConfig
 from api.ai_preference_models import UserAITaskPreference, TASK_KINDS
+from api.models import ChatGPTSubscriptionConnection
 from api.services.ai_execution import PersonalAIUnavailable, personal_clients_for_user
 from api.services.ai_task_preferences import (
     ModelSelectionError, require_task_model_snapshot, resolve_task_model,
@@ -25,7 +26,8 @@ SYNTHETIC_KEY = 'synthetic-t03-key-never-real-0123456'
 
 @override_settings(AI_BYOK_ENABLED=True, PUBLIC_SITE_MODE='full',
                    PROVIDER_CREDENTIAL_ENCRYPTION_KEY='synthetic-t03-encryption-material-only',
-                   PUBLIC_AI_ENABLED=False)
+                   PUBLIC_AI_ENABLED=False, CHATGPT_AUTH_MODE='local_oss',
+                   DJANGO_ENV='development')
 class AITaskPreferenceTests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -87,7 +89,15 @@ class AITaskPreferenceTests(TestCase):
                   deep_research=None, question_suggestions=None, revision=0):
         values = locals()
         return {'revision': revision, 'preferences': [
-            {'task_kind': kind, 'model_config_id': str(values[kind]) if values[kind] else None}
+            {
+                'task_kind': kind,
+                'selection_source': (
+                    'byok' if values[kind]
+                    else 'unset' if kind == 'default'
+                    else 'inherit'
+                ),
+                'model_config_id': str(values[kind]) if values[kind] else None,
+            }
             for kind in TASK_KINDS
         ]}
 
@@ -103,6 +113,39 @@ class AITaskPreferenceTests(TestCase):
         self.assertEqual([row['task_kind'] for row in response.data['preferences']], list(TASK_KINDS))
         self.assertEqual(response.data['preferences'][0]['selection_state'], 'unset')
         self.assertTrue(all(row['model_config_id'] is None for row in response.data['preferences']))
+
+    def test_subscription_can_be_explicitly_selected_for_supported_text_tasks(self):
+        ChatGPTSubscriptionConnection.objects.create(
+            user=self.owner, subject_hash='owner-subject', issuer='https://auth.example',
+            issued_client_id='issued-client', registration_key_hash='owner-registration',
+            encrypted_access_token='opaque-access', encrypted_refresh_token='opaque-refresh',
+            selected_model='listed-model-slug', is_active=True,
+        )
+        empty = self.api.get(PREFERENCES)
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.data['subscription']['state'], 'available')
+        self.assertEqual(empty.data['subscription']['model_id'], 'listed-model-slug')
+
+        response = self.save({'revision': 0, 'preferences': [
+            {
+                'task_kind': kind,
+                'selection_source': (
+                    'unset' if kind == 'default'
+                    else 'chatgpt_subscription' if kind == 'article_qa'
+                    else 'inherit'
+                ),
+                'model_config_id': None,
+            }
+            for kind in TASK_KINDS
+        ]})
+        self.assertEqual(response.status_code, 200, response.content)
+        article = next(
+            row for row in response.data['preferences']
+            if row['task_kind'] == 'article_qa'
+        )
+        self.assertEqual(article['selection_source'], 'chatgpt_subscription')
+        self.assertEqual(article['selection_state'], 'available')
+        self.assertIsNone(article['model_config_id'])
 
     def test_text_proof_alone_cannot_authorize_unsupported_streaming_tasks(self):
         self.model.model_id = 'synthetic-nonstream-model'
@@ -122,7 +165,9 @@ class AITaskPreferenceTests(TestCase):
         require_task_model_snapshot(snapshot, owner_id=self.owner.pk)
         self.assertEqual(self.save(self.selection(default=self.model.pk, deep_research=self.model.pk)).status_code, 200)
         for kind in ('article_qa', 'full_translation'):
-            UserAITaskPreference.objects.filter(user=self.owner, task_kind=kind).update(model_config=self.model)
+            UserAITaskPreference.objects.filter(
+                user=self.owner, task_kind=kind,
+            ).update(selection_source='byok', model_config=self.model)
         states = {row['task_kind']: row['selection_state'] for row in self.api.get(PREFERENCES).data['preferences']}
         self.assertEqual(states['article_qa'], 'needs_reselection')
         self.assertEqual(states['full_translation'], 'needs_reselection')

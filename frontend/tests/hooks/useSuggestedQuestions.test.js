@@ -81,9 +81,9 @@ describe('useSuggestedQuestions', () => {
 
   it('reads private suggestions without billing and requires explicit consent to generate', async () => {
     preferences.listAITaskPreferences.mockResolvedValue({ revision: 1, preferences: [{
-      task_kind: 'question_suggestions', selection_state: 'available', model_config_id: 'own-model',
+      task_kind: 'question_suggestions', selection_source: 'byok', selection_state: 'available', model_config_id: 'own-model',
       model: { model_id: 'deepseek-chat', display_name: 'Personal' },
-    }] })
+    }], subscription: { state: 'not_connected', model_id: null, display_name: null, research_eligible: false } })
     api.fetchSuggestedQuestions.mockResolvedValue(snapshot(['cached']))
     const { result } = renderHook(() => useSuggestedQuestions('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.questions).toEqual(['cached']))
@@ -94,7 +94,8 @@ describe('useSuggestedQuestions', () => {
     expect(api.fetchSuggestedQuestions).toHaveBeenCalledTimes(1)
     await act(() => result.current.refresh(true))
     expect(api.fetchSuggestedQuestions).toHaveBeenLastCalledWith(42, {
-      force: true, modelConfigId: 'own-model', consent: true, signal: expect.any(AbortSignal),
+      force: true, executionSource: 'byok', modelConfigId: 'own-model', consent: true,
+      signal: expect.any(AbortSignal),
     })
   })
 
@@ -104,7 +105,9 @@ describe('useSuggestedQuestions', () => {
     await waitFor(() => expect(result.current.questions).toEqual(['old1', 'old2', 'old3']))
     await result.current.refresh()
     await waitFor(() => expect(result.current.questions).toEqual(['new1', 'new2', 'new3']))
-    expect(api.fetchSuggestedQuestions).toHaveBeenLastCalledWith(42, { force: true, signal: expect.any(AbortSignal) })
+    expect(api.fetchSuggestedQuestions).toHaveBeenLastCalledWith(42, {
+      force: true, executionSource: undefined, signal: expect.any(AbortSignal),
+    })
     expect(api.fetchSuggestedQuestions).toHaveBeenCalledTimes(2)
   })
 

@@ -231,8 +231,11 @@ def test_unavailable_encryption_only_marks_selected_task_unavailable(context, se
                      auth_mode='api_key', api_key=KEY)
     model = UserAIModelConfig.objects.create(connection=row, model_id='deepseek-flash', display_name='Flash')
     for kind in TASK_KINDS:
-        UserAITaskPreference.objects.create(user=owner, task_kind=kind,
-                                            model_config=model if kind == 'default' else None)
+        UserAITaskPreference.objects.create(
+            user=owner, task_kind=kind,
+            selection_source='byok' if kind == 'default' else 'inherit',
+            model_config=model if kind == 'default' else None,
+        )
     settings.PROVIDER_CREDENTIAL_ENCRYPTION_KEY = ''
     response = api.get('/api/me/ai/task-preferences/')
     assert response.status_code == 200

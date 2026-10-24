@@ -11,12 +11,18 @@ from django.db import transaction
 
 from api.ai_model_models import UserAIModelConfig
 from api.ai_preference_models import TASK_KINDS, UserAITaskPreference
+
+
 from api.services.ai_credentials import (
     ConnectionSnapshot, CredentialUnavailable, CredentialEncryptionUnavailable, lock_owner,
     require_active_snapshot, snapshot_connection, execution_credential,
 )
 from api.services.ai_model_capabilities import verified_for_task
 from api.services.ai_model_registry import get_trusted_route, supports_task_route
+
+SUBSCRIPTION_TASKS = frozenset({
+    'article_qa', 'full_translation', 'question_suggestions', 'deep_research',
+})
 
 
 class ModelSelectionError(RuntimeError):
@@ -38,12 +44,54 @@ def _rows(user_id):
     return {entry.task_kind: entry for entry in entries}, entries[0].revision if entries else 0
 
 
-def _selected_state(preference, kind, owner_id):
-    if preference is None or preference.model_config_id is None:
-        return 'unset' if kind == 'default' else 'inherit_default', None
+def _subscription_info(user):
+    from api.services.chatgpt_subscription import active_connection_for_user
+    from api.services.research.subscription_execution import tools_supported
+    connection = active_connection_for_user(user)
+    if connection is None:
+        return {
+            'state': 'not_connected', 'model_id': None,
+            'display_name': None, 'research_eligible': False,
+        }
+    if connection.needs_reauth or not connection.connected:
+        state = 'needs_reauth'
+    elif not connection.selected_model:
+        state = 'model_required'
+    else:
+        state = 'available'
+    return {
+        'state': state,
+        'model_id': connection.selected_model or None,
+        'display_name': connection.selected_model or None,
+        'research_eligible': state == 'available' and tools_supported(connection),
+    }
+
+
+def _selected_state(preference, kind, owner_id, subscription):
+    source = preference.selection_source if preference is not None else (
+        'unset' if kind == 'default' else 'inherit'
+    )
+    if source in {'unset', 'inherit'}:
+        expected = 'unset' if kind == 'default' else 'inherit'
+        state = 'unset' if kind == 'default' else 'inherit_default'
+        return (
+            state if source == expected else 'needs_reselection',
+            None,
+            source,
+        )
+    if source == 'chatgpt_subscription':
+        if kind not in SUBSCRIPTION_TASKS:
+            return 'needs_verification', None, source
+        state = subscription['state']
+        available = state == 'available' and (
+            kind != 'deep_research' or subscription['research_eligible']
+        )
+        return 'available' if available else 'needs_verification', None, source
+    if source != 'byok' or preference is None or preference.model_config_id is None:
+        return 'needs_reselection', None, source
     model = preference.model_config
     if model is None or model.connection.user_id != owner_id:
-        return 'needs_reselection', None
+        return 'needs_reselection', None, source
     info = {
         'id': str(model.pk), 'connection_id': str(model.connection_id),
         'model_id': model.model_id, 'display_name': model.display_name,
@@ -52,30 +100,37 @@ def _selected_state(preference, kind, owner_id):
     connection = model.connection
     if (model.is_deleted or connection.is_deleted or not connection.is_enabled
             or not supports_task_route(connection, model.model_id, kind)):
-        return 'needs_reselection', info
+        return 'needs_reselection', info, source
     try:
         execution_credential(connection)
     except (CredentialUnavailable, CredentialEncryptionUnavailable):
-        return 'needs_reselection', info
+        return 'needs_reselection', info, source
     if not verified_for_task(model, kind):
-        return 'needs_verification', info
-    return 'available', info
+        return 'needs_verification', info, source
+    return 'available', info, source
 
 
 def read_preferences(user):
     if not user or not getattr(user, 'is_authenticated', False) or not user.is_active:
         raise ModelSelectionError('authentication_required')
     rows, revision = _rows(user.pk)
+    subscription = _subscription_info(user)
     preferences = []
     for kind in TASK_KINDS:
         row = rows.get(kind)
-        status, info = _selected_state(row, kind, user.pk)
+        status, info, source = _selected_state(
+            row, kind, user.pk, subscription,
+        )
         selected_id = str(row.model_config_id) if info is not None else None
         preferences.append({
-            'task_kind': kind, 'model_config_id': selected_id,
+            'task_kind': kind, 'selection_source': source,
+            'model_config_id': selected_id,
             'selection_state': status, 'model': info,
         })
-    return {'revision': revision, 'preferences': preferences}
+    return {
+        'revision': revision, 'preferences': preferences,
+        'subscription': subscription,
+    }
 
 
 def _require_model(owner_id, config):
@@ -102,14 +157,42 @@ def _require_for_task(owner_id, config, task_kind):
     return identity, route
 
 
+def _validate_entry(entry, subscription):
+    kind = entry['task_kind']
+    source = entry['selection_source']
+    model_id = entry['model_config_id']
+    if kind == 'default':
+        if source not in {'unset', 'byok'}:
+            raise ModelSelectionError('selection_source_unavailable')
+    elif source not in {'inherit', 'byok', 'chatgpt_subscription'}:
+        raise ModelSelectionError('selection_source_unavailable')
+    if source == 'byok':
+        if model_id is None:
+            raise ModelSelectionError('model_not_found')
+    elif model_id is not None:
+        raise ModelSelectionError('selection_source_invalid')
+    if source == 'chatgpt_subscription':
+        if kind not in SUBSCRIPTION_TASKS:
+            raise ModelSelectionError('model_not_verified')
+        if subscription['state'] != 'available':
+            raise ModelSelectionError('subscription_unavailable')
+        if kind == 'deep_research' and not subscription['research_eligible']:
+            raise ModelSelectionError('model_not_verified')
+
+
 @transaction.atomic
 def save_preferences(user, expected_revision, entries):
     lock_owner(user.pk)
     stored, revision = _rows(user.pk)
     if revision != expected_revision:
         raise ModelSelectionError('preferences_changed')
-    selected_ids = {entry['model_config_id'] for entry in entries
-                    if entry['model_config_id'] is not None}
+    subscription = _subscription_info(user)
+    for entry in entries:
+        _validate_entry(entry, subscription)
+    selected_ids = {
+        entry['model_config_id'] for entry in entries
+        if entry['selection_source'] == 'byok'
+    }
     available = {
         model.pk: model for model in UserAIModelConfig.objects.select_related('connection').filter(
             pk__in=selected_ids, connection__user_id=user.pk, is_deleted=False,
@@ -119,21 +202,25 @@ def save_preferences(user, expected_revision, entries):
         raise ModelSelectionError('model_not_found')
     for entry in entries:
         model_id = entry['model_config_id']
-        if model_id is not None:
+        if entry['selection_source'] == 'byok':
             _require_for_task(user.pk, available[model_id], entry['task_kind'])
     next_revision = revision + 1
     for entry in entries:
         row = stored.get(entry['task_kind'])
+        model = available.get(entry['model_config_id'])
         if row is None:
             UserAITaskPreference.objects.create(
                 user=user, task_kind=entry['task_kind'],
-                model_config=available.get(entry['model_config_id']),
-                revision=next_revision,
+                selection_source=entry['selection_source'],
+                model_config=model, revision=next_revision,
             )
         else:
-            row.model_config = available.get(entry['model_config_id'])
+            row.selection_source = entry['selection_source']
+            row.model_config = model
             row.revision = next_revision
-            row.save(update_fields=['model_config', 'revision', 'updated_at'])
+            row.save(update_fields=[
+                'selection_source', 'model_config', 'revision', 'updated_at',
+            ])
     return read_preferences(user)
 
 
@@ -172,11 +259,19 @@ def resolve_task_model(user, task_kind, explicit_model_id=None):
         selected_by = 'explicit' if explicit_model_id is not None else task_kind
         if explicit_model_id is None:
             preference = stored.get(task_kind)
-            selected_id = preference.model_config_id if preference else None
-            if selected_id is None and task_kind != 'default':
+            source = preference.selection_source if preference is not None else (
+                'unset' if task_kind == 'default' else 'inherit'
+            )
+            selected_id = preference.model_config_id if source == 'byok' and preference else None
+            if source == 'chatgpt_subscription':
+                raise ModelSelectionError('subscription_selected')
+            if source == 'inherit' and task_kind != 'default':
                 default = stored.get('default')
-                selected_id = default.model_config_id if default else None
-                selected_by = 'default'
+                if default is not None and default.selection_source == 'byok':
+                    selected_id = default.model_config_id
+                    selected_by = 'default'
+            elif source not in {'byok', 'unset'}:
+                raise ModelSelectionError('preferences_inconsistent')
         else:
             selected_id = explicit_model_id
         if selected_id is None:

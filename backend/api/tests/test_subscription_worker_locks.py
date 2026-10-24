@@ -1,8 +1,13 @@
 """Real competing reader + DB-only rollback tests; fake provider only."""
 import inspect
+import json
+import os
+from pathlib import Path
+import subprocess
+from datetime import timedelta
+import sys
 import threading
 import uuid
-from datetime import timedelta
 from unittest.mock import Mock
 
 import pytest
@@ -228,6 +233,132 @@ def test_claim_write_rollback_then_one_token_wins(owner, article, monkeypatch):
     task = ChatGPTTranslationTask.objects.get(pk=handle.id)
     assert len(writes) == 2 and task.run_token == token and task.generation == 1
     assert task.status == 'running' and not task.provider_started
+
+def test_claim_write_first_prevents_wal_snapshot_upgrade(tmp_path):
+    backend_dir = Path(__file__).resolve().parents[2]
+    database = tmp_path / 'wal-claim.sqlite3'
+    script = r'''
+import json
+import threading
+import uuid
+
+import django
+django.setup()
+
+from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.db import OperationalError, close_old_connections, connection
+from django.utils import timezone
+
+from api.models import Category, ChatGPTTranslationTask, News, Source
+from api.services import chatgpt_subscription_jobs as jobs
+from api.tests.rss.reader_fixtures import public_legacy_article
+from api.tests.test_subscription_recovery import make_connection
+
+call_command('migrate', interactive=False, verbosity=0)
+with connection.cursor() as cursor:
+    cursor.execute('PRAGMA journal_mode')
+    journal_mode = cursor.fetchone()[0]
+
+User = get_user_model()
+owner = User.objects.create_user(username='wal-claim-owner')
+article = public_legacy_article(News.objects.create(
+    title='WAL claim article',
+    url='https://example.test/wal-claim',
+    publish_time=timezone.now(),
+    source=Source.objects.create(
+        name='WAL claim source', url='https://example.test', language='en',
+    ),
+    category=Category.objects.create(name='WAL claim', slug='wal-claim'),
+    full_content='# WAL claim\n\nOriginal source text.',
+    full_content_state='legacy',
+))
+account = make_connection(owner)
+jobs._dispatch_task = lambda *_args: None
+handle = jobs.start_or_get_job(owner, account, article)
+
+original_snapshot = jobs._queued_task_snapshot
+writer_started = threading.Event()
+writer_done = threading.Event()
+writer_errors = []
+thread_box = {}
+
+def competing_writer():
+    close_old_connections()
+    try:
+        writer_started.set()
+        User.objects.filter(pk=owner.pk).update(last_name='competing writer')
+    except Exception as error:
+        writer_errors.append(type(error).__name__)
+    finally:
+        close_old_connections()
+        writer_done.set()
+
+def snapshot_then_compete(task_id, generation):
+    task = original_snapshot(task_id, generation)
+    if not thread_box:
+        thread = threading.Thread(target=competing_writer, name='claim-competing-writer')
+        thread_box['thread'] = thread
+        thread.start()
+        if not writer_started.wait(5):
+            raise RuntimeError('writer did not start')
+        writer_done.wait(0.2)
+    return task
+
+jobs._queued_task_snapshot = snapshot_then_compete
+# This checks that the first claim attempt is intrinsically safe; retrying a
+# poisoned WAL snapshot only masks the read-before-write bug.
+jobs._retry_task_database_operation = lambda operation, **_kwargs: operation()
+claimed = None
+sqlite_code = None
+try:
+    claimed = jobs._claim_persistent_task(handle.id, handle.generation, uuid.uuid4())
+except OperationalError as error:
+    sqlite_code = getattr(error.__cause__, 'sqlite_errorcode', None)
+
+thread = thread_box.get('thread')
+if thread is not None:
+    thread.join(6)
+task = ChatGPTTranslationTask.objects.get(pk=handle.id)
+print(json.dumps({
+    'journal_mode': journal_mode,
+    'claimed': claimed,
+    'sqlite_code': sqlite_code,
+    'writer_alive': bool(thread and thread.is_alive()),
+    'writer_errors': writer_errors,
+    'status': task.status,
+}))
+'''
+    environment = {
+        **os.environ,
+        'DJANGO_SETTINGS_MODULE': 'newsaggregator.settings',
+        'DJANGO_ENV': 'development',
+        'DJANGO_DB_PATH': str(database),
+        'DJANGO_SECRET_KEY': 'synthetic-wal-claim-secret-0123456789-abcdefghijklmnopqrstuvwxyz',
+        'CHATGPT_AUTH_MODE': 'local_oss',
+        'PUBLIC_SITE_MODE': 'full',
+        'PUBLIC_AI_ENABLED': '1',
+        'RUN_MAIN': 'true',
+        'PYTHONPATH': str(backend_dir),
+    }
+    result = subprocess.run(
+        [sys.executable, '-c', script],
+        cwd=backend_dir,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert report == {
+        'journal_mode': 'wal',
+        'claimed': 1,
+        'sqlite_code': None,
+        'writer_alive': False,
+        'writer_errors': [],
+        'status': 'running',
+    }
 
 
 def test_sse_poll_retries_transient_read_lock_without_dispatch(owner, article, monkeypatch):

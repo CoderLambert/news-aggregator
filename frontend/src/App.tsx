@@ -53,8 +53,8 @@ function SpeechCapabilityGate() {
 }
 function ResearchCapabilityGate() {
   const { enabled: researchEnabled } = useCapability('research')
-  const { enabled: byokCreateEnabled } = useCapability('research_byok_create')
-  return researchEnabled || byokCreateEnabled
+  const { enabled: authorizedCreateEnabled } = useCapability('research_byok_create')
+  return researchEnabled || authorizedCreateEnabled
     ? <ResearchLauncher key="research-enabled" />
     : null
 }

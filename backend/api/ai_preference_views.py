@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework.response import Response
 
 from api.ai_connection_views import ConnectionView, StrictSerializer, error
-from api.ai_preference_models import TASK_KINDS
+from api.ai_preference_models import SELECTION_SOURCES, TASK_KINDS
 from api.services.ai_task_preferences import (
     ModelSelectionError, read_preferences, save_preferences,
 )
@@ -11,8 +11,8 @@ from api.services.ai_task_preferences import (
 
 class TaskSelectionSerializer(StrictSerializer):
     task_kind = serializers.ChoiceField(choices=TASK_KINDS)
+    selection_source = serializers.ChoiceField(choices=SELECTION_SOURCES)
     model_config_id = serializers.UUIDField(allow_null=True)
-
 
 class TaskPreferencesPatchSerializer(StrictSerializer):
     revision = serializers.IntegerField(min_value=0)

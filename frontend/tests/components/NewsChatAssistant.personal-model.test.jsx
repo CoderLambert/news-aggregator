@@ -9,7 +9,7 @@ const calls = vi.hoisted(() => ({
   stop: vi.fn(),
   quickSend: vi.fn(() => Promise.resolve(true)),
   refresh: vi.fn(),
-  preferenceError: false, reload: vi.fn(),
+  preferenceError: false, subscription: false, reload: vi.fn(),
 }))
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { id: 7 }, loading: false }),
@@ -40,12 +40,14 @@ vi.mock('@/components/chat/ChatInput', () => ({
 }))
 vi.mock('@/hooks/useDefaultAIModel', () => ({
   useDefaultAIModel: () => ({ isPending: false, isError: calls.preferenceError, refetch: calls.reload,
-    selection: calls.preferenceError ? null : { model_config_id: '22222222-2222-4222-8222-222222222222', model: { display_name: 'Default' } } }),
+    selection: calls.preferenceError ? null : calls.subscription
+      ? { selection_source: 'chatgpt_subscription', model_config_id: null, model: null }
+      : { selection_source: 'byok', model_config_id: '22222222-2222-4222-8222-222222222222', model: { display_name: 'Default' } } }),
 }))
 vi.mock('@/components/chat/ClearChatDialog', () => ({ default: () => null }))
 vi.mock('@/components/chat/Confetti', () => ({ default: () => null }))
 
-beforeEach(() => { vi.clearAllMocks(); calls.preferenceError = false })
+beforeEach(() => { vi.clearAllMocks(); calls.preferenceError = false; calls.subscription = false })
 
 describe('T04 article assistant explicit billing intent', () => {
   it('reports a preference read failure without falsely asking the user to configure a model', () => {
@@ -72,6 +74,15 @@ describe('T04 article assistant explicit billing intent', () => {
     expect(calls.send).toHaveBeenCalledTimes(2)
     expect(vi.mocked(useChat)).toHaveBeenLastCalledWith(42, true,
       '22222222-2222-4222-8222-222222222222', true, undefined, 'current')
+  })
+
+  it('allows the saved ChatGPT subscription source without requiring a BYOK model id', () => {
+    calls.subscription = true
+    render(<MemoryRouter><NewsChatAssistant newsId={42} open /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: '发送聊天问题' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '发送聊天问题' }))
+    expect(calls.send).toHaveBeenCalledOnce()
+    expect(vi.mocked(useChat)).toHaveBeenLastCalledWith(42, true, null, false, undefined, 'current')
   })
 
   it('a recommended question sends directly, while refresh explicitly authorizes only recommendation generation', () => {

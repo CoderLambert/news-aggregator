@@ -4,29 +4,43 @@ import { Card } from '@/components/ui/card'
 import { ModelCombobox } from '@/components/ui/model-combobox'
 import { ChevronDown, RefreshCw, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   ConnectionRequestError, listAIModels, listAITaskPreferences, saveAITaskPreferences,
   hasAIConnectionAuthentication,
   type AIConnection, type AIModel, type AITaskKind, type AITaskPreferences,
-  type AITaskPreferenceInput,
+  type AITaskPreferenceInput, type AITaskSelectionSource,
 } from '@/services/aiConnectionsApi'
 
-type Draft = Record<AITaskKind, string | null>
+interface DraftSelection {
+  source: AITaskSelectionSource
+  modelConfigId: string | null
+}
+type Draft = Record<AITaskKind, DraftSelection>
+const SUBSCRIPTION_VALUE = 'chatgpt_subscription'
 const OPTIONS: Array<{ kind: AITaskKind; label: string; description: string }> = [
-  { kind: 'default', label: '全局默认', description: '其他用途留空时跟随默认；不自动借用站点模型。' },
-  { kind: 'article_qa', label: '新闻问答', description: '选择文章阅读页个人模型问答使用的模型。' },
-  { kind: 'full_translation', label: '全文翻译', description: '独立选择用于私人全文翻译的模型。' },
+  { kind: 'default', label: '全局默认', description: '其他用途留空时跟随默认；ChatGPT 订阅不会隐式接管未来功能。' },
+  { kind: 'article_qa', label: '新闻问答', description: '选择文章阅读页问答使用的模型来源。' },
+  { kind: 'full_translation', label: '全文翻译', description: '独立选择用于私人全文翻译的模型来源。' },
   { kind: 'deep_research', label: '深度研究', description: '需要文本和工具调用能力均已验证。' },
-  { kind: 'question_suggestions', label: '问题推荐', description: '单独指定或继承个人默认模型。' },
+  { kind: 'question_suggestions', label: '问题推荐', description: '单独指定、使用 ChatGPT 订阅或继承个人默认模型。' },
 ]
 function selections(prefs: AITaskPreferences): Draft {
-  const result: Draft = { default: null, article_qa: null, full_translation: null,
-    deep_research: null, question_suggestions: null }
-  for (const entry of prefs.preferences) result[entry.task_kind] = entry.model_config_id
+  const result: Draft = {
+    default: { source: 'unset', modelConfigId: null },
+    article_qa: { source: 'inherit', modelConfigId: null },
+    full_translation: { source: 'inherit', modelConfigId: null },
+    deep_research: { source: 'inherit', modelConfigId: null },
+    question_suggestions: { source: 'inherit', modelConfigId: null },
+  }
+  for (const entry of prefs.preferences) result[entry.task_kind] = {
+    source: entry.selection_source, modelConfigId: entry.model_config_id,
+  }
   return result
 }
 function same(a: Draft, b: Draft) {
-  return OPTIONS.every(option => a[option.kind] === b[option.kind])
+  return OPTIONS.every(({ kind }) => a[kind].source === b[kind].source
+    && a[kind].modelConfigId === b[kind].modelConfigId)
 }
 function safeMessage(reason: unknown) {
   return reason instanceof ConnectionRequestError ? reason.message : '状态未知，请重新读取用途偏好。'
@@ -85,13 +99,26 @@ export default function AITaskPreferencesSection({
       (!['article_qa', 'full_translation'].includes(kind) || model.article_chat_supported === true) &&
       (kind !== 'deep_research' || model.capabilities.tools === 'supported'))
   }
-  const invalid = Boolean(choices && OPTIONS.some(({ kind }) => {
-    const id = choices[kind]
-    return id !== null && !validModel(id, kind)
-  }))
+  const validSelection = (selection: DraftSelection, kind: AITaskKind) => {
+    if (selection.source === 'byok') {
+      return Boolean(selection.modelConfigId && validModel(selection.modelConfigId, kind))
+    }
+    if (selection.source === 'chatgpt_subscription') {
+      return kind !== 'default' && remote?.subscription.state === 'available'
+        && (kind !== 'deep_research' || remote.subscription.research_eligible)
+    }
+    return selection.source === (kind === 'default' ? 'unset' : 'inherit')
+  }
+  const invalid = Boolean(choices && OPTIONS.some(({ kind }) =>
+    !validSelection(choices[kind], kind)))
   const change = (kind: AITaskKind, selected: string) => {
     if (!choices || !saved) return
-    const next: Draft = { ...choices, [kind]: selected || null }
+    const selection: DraftSelection = selected === SUBSCRIPTION_VALUE
+      ? { source: 'chatgpt_subscription', modelConfigId: null }
+      : selected
+        ? { source: 'byok', modelConfigId: selected }
+        : { source: kind === 'default' ? 'unset' : 'inherit', modelConfigId: null }
+    const next: Draft = { ...choices, [kind]: selection }
     setDraft(same(next, saved) ? null : next)
     setNotice('')
   }
@@ -102,7 +129,8 @@ export default function AITaskPreferencesSection({
     writing.current = true
     setBusy(true); setError(''); setNotice('')
     const payload: AITaskPreferenceInput[] = OPTIONS.map(({ kind }) => ({
-      task_kind: kind, model_config_id: choices[kind],
+      task_kind: kind, selection_source: choices[kind].source,
+      model_config_id: choices[kind].modelConfigId,
     }))
     try {
       const updated = await saveAITaskPreferences(remote.revision, payload, viewer, controller.signal)
@@ -122,25 +150,47 @@ export default function AITaskPreferencesSection({
 
   const renderField = ({ kind, label, description }: typeof OPTIONS[number]) => {
     if (!remote || !choices || !models) return null
-    const id = choices[kind]
+    const selection = choices[kind]
+    const id = selection.modelConfigId
     const savedEntry = remote.preferences.find(entry => entry.task_kind === kind)
     const available = models.filter(model => validModel(model.id, kind))
+    const subscriptionAvailable = remote.subscription.state === 'available'
+      && (kind !== 'deep_research' || remote.subscription.research_eligible)
+    const subscriptionLabel = remote.subscription.display_name
+      ? `ChatGPT 订阅 · ${remote.subscription.display_name}` : 'ChatGPT 订阅'
+    const value = selection.source === 'chatgpt_subscription'
+      ? SUBSCRIPTION_VALUE : selection.source === 'byok' ? id ?? '' : ''
     return <fieldset key={kind} className={kind === 'default' ? 'min-w-0 rounded-xl border border-primary/15 bg-primary/5 p-5' : 'min-w-0 rounded-xl border p-4'}>
       <label className="mb-2 flex items-center gap-2 text-sm font-medium">{kind === 'default' && <Sparkles className="size-4 text-primary" />}{label}模型</label>
-      <ModelCombobox label={label + '模型'} value={id ?? ''} disabled={busy || reconcileRequired}
-        onChange={value => change(kind, value)} options={[
+      <ModelCombobox label={label + '模型'} value={value} disabled={busy || reconcileRequired}
+        onChange={next => change(kind, next)} options={[
           { value: '', label: kind === 'default' ? '不设置默认模型' : '跟随个人默认模型' },
-          ...(id && !validModel(id, kind) ? [{ value: id, label: '原模型已失效，需重新选择', disabled: true }] : []),
+          ...(kind === 'default' ? [] : [{
+            value: SUBSCRIPTION_VALUE, label: subscriptionLabel,
+            description: subscriptionAvailable
+              ? '使用当前账号独立授权的 ChatGPT 订阅'
+              : kind === 'deep_research' && remote.subscription.state === 'available'
+                ? '尚未验证研究工具能力'
+                : '请先完成 ChatGPT 订阅授权并选择模型',
+            disabled: !subscriptionAvailable,
+          }]),
+          ...(id && selection.source === 'byok' && !validModel(id, kind)
+            ? [{ value: id, label: '原模型已失效，需重新选择', disabled: true }] : []),
           ...available.map(model => ({ value: model.id, label: model.display_name,
             description: (connectionsById.get(model.connection_id)?.display_name ?? '已保存连接') + ' · ' + model.model_id })),
         ]} />
       <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{description}</p>
-      {id && id === savedEntry?.model_config_id && savedEntry.selection_state === 'needs_reselection' && <p role="alert" className="mt-2 text-xs text-destructive">已选模型停用或删除，必须重新选择。</p>}
-      {id && id === savedEntry?.model_config_id && savedEntry.selection_state === 'needs_verification' && <p role="alert" className="mt-2 text-xs text-destructive">已选模型的必要能力尚未验证。</p>}
-      {kind === 'deep_research' && !id && choices.default && !validModel(choices.default, kind) && <p className="mt-2 text-xs text-amber-700">当前默认模型未通过工具能力验证，深度研究仍不可用。</p>}
+      {savedEntry?.selection_state === 'needs_reselection' && savedEntry.selection_source === selection.source && <p role="alert" className="mt-2 text-xs text-destructive">已选来源或模型当前不可用，必须重新选择。</p>}
+      {savedEntry?.selection_state === 'needs_verification' && savedEntry.selection_source === selection.source && <p role="alert" className="mt-2 text-xs text-destructive">已选模型的必要能力尚未验证。</p>}
+      {kind === 'deep_research' && selection.source === 'inherit'
+        && choices.default.source === 'byok'
+        && choices.default.modelConfigId
+        && !validModel(choices.default.modelConfigId, kind)
+        && <p className="mt-2 text-xs text-amber-700">当前默认模型未通过工具能力验证，深度研究仍不可用。</p>}
     </fieldset>
   }
-  const overrides = choices ? OPTIONS.filter(option => option.kind !== 'default' && choices[option.kind] !== null).length : 0
+  const overrides = choices ? OPTIONS.filter(option =>
+    option.kind !== 'default' && choices[option.kind].source !== 'inherit').length : 0
   return <section className="mt-7 min-w-0" aria-label="个人模型用途偏好">
     <Card className="gap-4 p-5 shadow-none">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="flex items-center gap-2 text-base font-semibold"><SlidersHorizontal className="size-4 text-primary" />模型用途偏好</h2>
@@ -151,11 +201,27 @@ export default function AITaskPreferencesSection({
       {notice && <p role="status" className="text-sm text-primary">{notice}</p>}
       {!loading && !remote && <p role="status">用途偏好状态未知，确认当前账号的数据前不能保存。</p>}
       {remote && choices && models && <>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-secondary/20 p-3">
+          <div>
+            <p className="text-sm font-medium">ChatGPT Subscription</p>
+            <p className="text-xs text-muted-foreground">{remote.subscription.state === 'available'
+              ? `已连接 · ${remote.subscription.display_name}`
+              : remote.subscription.state === 'needs_reauth' ? '授权已失效，需要重新授权'
+                : remote.subscription.state === 'model_required' ? '已连接，请先选择订阅模型'
+                  : '尚未连接'}</p>
+          </div>
+          <Button asChild variant="outline" size="sm"><Link to="/settings/chatgpt">管理授权</Link></Button>
+        </div>
         {renderField(OPTIONS[0])}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-secondary/30 p-3">
-          <p className="text-xs text-muted-foreground">{overrides ? `${overrides} 个用途已单独指定模型，可统一跟随默认。` : '问答、翻译、研究和问题推荐均跟随默认配置。'}</p>
+          <p className="text-xs text-muted-foreground">{overrides ? `${overrides} 个用途已单独指定来源，可统一跟随默认。` : '问答、翻译、研究和问题推荐均跟随默认配置。'}</p>
           <Button variant="outline" size="sm" disabled={busy || reconcileRequired || overrides === 0} onClick={() => {
-            const next: Draft = { default: choices.default, article_qa: null, full_translation: null, deep_research: null, question_suggestions: null }
+            const inherited = { source: 'inherit', modelConfigId: null } as const
+            const next: Draft = {
+              default: choices.default,
+              article_qa: inherited, full_translation: inherited,
+              deep_research: inherited, question_suggestions: inherited,
+            }
             setDraft(saved && same(next, saved) ? null : next); setNotice('请保存用途偏好以应用变更。')
           }}>所有用途跟随默认</Button>
         </div>

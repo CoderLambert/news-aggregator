@@ -44,7 +44,7 @@ describe('translateFullArticleStream', () => {
     expect(url).toContain('/api/news/42/translate/')
     expect(url).toContain('lang=zh')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body)).toEqual({ force: true })
+    expect(JSON.parse(init.body)).toEqual({ force: true, execution_source: 'chatgpt_subscription' })
   })
 
   it('reassembles long translated articles and incremental progress under the 32-KiB wire limit', async () => {
@@ -105,7 +105,7 @@ describe('translateFullArticleStream', () => {
     await collect(translateFullArticleStream('42', { force: false, signal: controller.signal }))
     const [, init] = globalThis.fetch.mock.calls[0]
     expect(init.signal).toBe(controller.signal)
-    expect(JSON.parse(init.body)).toEqual({ force: false })
+    expect(JSON.parse(init.body)).toEqual({ force: false, execution_source: 'chatgpt_subscription' })
   })
 })
 
@@ -155,12 +155,17 @@ describe('createResearchStream', () => {
   })
 
   it.each([
-    ['model without consent', { modelConfigId: 'verified-model' }],
-    ['consent without model', { consent: true }],
-    ['non-literal consent', { modelConfigId: 'verified-model', consent: false }],
-  ])('rejects incomplete BYOK create authorization: %s', async (_label, authorization) => {
+    ['model without source', { modelConfigId: 'verified-model', consent: true }],
+    ['source without consent', { executionSource: 'byok', modelConfigId: 'verified-model' }],
+    ['subscription with BYOK model', {
+      executionSource: 'chatgpt_subscription', modelConfigId: 'verified-model', consent: true,
+    }],
+    ['non-literal consent', {
+      executionSource: 'byok', modelConfigId: 'verified-model', consent: false,
+    }],
+  ])('rejects incomplete research create authorization: %s', async (_label, authorization) => {
     const events = createResearchStream('analyze this', authorization)
-    await expect(collect(events)).rejects.toThrow(/explicit model and literal consent/)
+    await expect(collect(events)).rejects.toThrow(/explicit source and literal consent/)
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
@@ -172,6 +177,7 @@ describe('createResearchStream', () => {
       localOnly: false,
       idempotencyKey: 'research-idempotency-key',
       signal: controller.signal,
+      executionSource: 'byok',
       modelConfigId,
       consent: true,
     })
@@ -184,7 +190,22 @@ describe('createResearchStream', () => {
     expect(JSON.parse(init.body)).toEqual({
       query: 'analyze this',
       local_only: false,
+      execution_source: 'byok',
       model_config_id: modelConfigId,
+      consent: true,
+    })
+  })
+
+  it('sends subscription authorization without a BYOK model id', async () => {
+    globalThis.fetch.mockResolvedValueOnce(streamResponse(['data: {"type":"complete"}\n']))
+    await collect(createResearchStream('analyze with subscription', {
+      executionSource: 'chatgpt_subscription',
+      consent: true,
+    }))
+    expect(JSON.parse(globalThis.fetch.mock.calls[0][1].body)).toEqual({
+      query: 'analyze with subscription',
+      local_only: false,
+      execution_source: 'chatgpt_subscription',
       consent: true,
     })
   })

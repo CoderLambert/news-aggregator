@@ -97,13 +97,22 @@ def test_verified_text_enables_chat_translation_but_not_research(unified):
 
 def test_default_model_reports_research_eligibility_from_current_tools_receipt(unified):
     from api.services.ai_task_preferences import _selected_state
-    preference = N(model_config_id=unified.model.pk, model_config=unified.model)
+    preference = N(
+        selection_source='byok',
+        model_config_id=unified.model.pk,
+        model_config=unified.model,
+    )
+    subscription = {'state': 'not_connected'}
     prove(unified)
-    state, info = _selected_state(preference, 'default', unified.owner.pk)
-    assert state == 'available' and info['research_eligible'] is False
+    state, info, source = _selected_state(
+        preference, 'default', unified.owner.pk, subscription,
+    )
+    assert state == 'available' and source == 'byok' and info['research_eligible'] is False
     prove(unified, ('tools',))
-    state, info = _selected_state(preference, 'default', unified.owner.pk)
-    assert state == 'available' and info['research_eligible'] is True
+    state, info, source = _selected_state(
+        preference, 'default', unified.owner.pk, subscription,
+    )
+    assert state == 'available' and source == 'byok' and info['research_eligible'] is True
 
 
 def test_research_without_tools_is_rejected_before_any_run_or_dispatch(unified):
@@ -111,7 +120,8 @@ def test_research_without_tools_is_rejected_before_any_run_or_dispatch(unified):
     prove(unified)
     with patch('api.services.research.job_manager._dispatch') as dispatch:
         response = unified.api.post('/api/research/', {'query': 'Synthetic local research',
-            'model_config_id': str(unified.model.pk), 'consent': True}, format='json',
+            'execution_source': 'byok', 'model_config_id': str(unified.model.pk),
+            'consent': True}, format='json',
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
     assert response.status_code == 409
     assert response.data['error_code'] == 'research_model_not_verified'

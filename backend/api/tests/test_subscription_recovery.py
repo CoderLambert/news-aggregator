@@ -24,6 +24,7 @@ from api.models import (
 )
 from api.tests.rss.reader_fixtures import public_legacy_article
 from api.services import chatgpt_subscription as subscription
+from api.services import chatgpt_subscription_llm as subscription_llm
 from api.services import chatgpt_subscription_jobs as jobs
 from api.services import shared_translations
 from api.subscription_views import subscription_translation_response
@@ -204,6 +205,20 @@ def test_worker_claim_is_single_and_started_state_precedes_provider(owner, artic
     assert task.result['full_content_zh'] == 'complete translation'
     assert len(provider_calls) == 1
     assert ChatGPTArticleTranslation.objects.get(user=owner, news=article).content == 'complete translation'
+
+def test_worker_claim_accepts_an_authorized_available_body(owner, article, monkeypatch):
+    article.full_content_state = 'available'
+    article.save(update_fields=['full_content_state'])
+    connection = make_connection(owner)
+    handle = start_queued(owner, connection, article, monkeypatch)
+    run_token = uuid.uuid4()
+
+    assert jobs._claim_persistent_task(handle.id, handle.generation, run_token) == 1
+
+    task = ChatGPTTranslationTask.objects.get(pk=handle.id)
+    assert task.status == 'running'
+    assert task.run_token == run_token
+    assert task.provider_started is False
 
 
 def test_registry_reset_and_new_handle_read_persistent_progress_and_result(owner, article, monkeypatch):
@@ -473,6 +488,51 @@ def test_sse_disconnect_does_not_cancel_background_worker(owner, article, monkey
             time.sleep(0.01)
         assert not pending, 'background test worker did not exit before cleanup'
 
+def test_translation_stream_flushes_before_a_queued_worker_produces_output(owner, article, monkeypatch):
+    connection = make_connection(owner)
+    handle = start_queued(owner, connection, article, monkeypatch)
+    monkeypatch.setattr(jobs, '_dispatch_task', Mock())
+    request = APIRequestFactory().post('/api/news/1/translate/', {'force': False}, format='json')
+    request.user = owner
+
+    response = subscription_translation_response(request, article, force=False)
+    stream = iter(response.streaming_content)
+    try:
+        first_event = next(stream)
+        assert b'"progress": ""' in first_event
+        assert ChatGPTTranslationTask.objects.get(pk=handle.id).status == 'queued'
+    finally:
+        response.close()
+        close = getattr(stream, 'close', None)
+        if close:
+            close()
+
+
+def test_research_worker_saturation_does_not_block_translation_dispatch():
+    from api.services.research import job_manager
+
+    release = threading.Event()
+    research_started = [threading.Event(), threading.Event()]
+
+    def occupy_research_worker(index):
+        research_started[index].set()
+        assert release.wait(5)
+
+    research_futures = [
+        job_manager.submit_research_task(occupy_research_worker, index)
+        for index in range(2)
+    ]
+    translation_started = threading.Event()
+    try:
+        assert all(started.wait(2) for started in research_started)
+        translation_future = jobs.submit_translation_task(translation_started.set)
+        assert translation_started.wait(2)
+        assert translation_future.result(timeout=2) is None
+    finally:
+        release.set()
+        for future in research_futures:
+            future.result(timeout=5)
+
 
 def test_cancel_during_token_refresh_wait_blocks_decrypt_and_network(owner, monkeypatch):
     connection = make_connection(owner)
@@ -544,7 +604,7 @@ def test_cancel_during_delta_blocks_later_delta_and_closes_response(owner, artic
     monkeypatch.setattr(subscription, 'access_token_for', lambda *_args, **_kwargs: 'synthetic-token')
     with patch.object(subscription.requests, 'post', return_value=response) as post:
         with pytest.raises(subscription.SubscriptionError, match='已取消'):
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, connection.selected_model,
                 article.full_content, append, execution_guard=guard,
             )
@@ -606,7 +666,7 @@ def test_guard_after_refresh_return_blocks_model_post(owner, article):
     with patch.object(subscription, 'access_token_for', side_effect=after_refresh), \
             patch.object(subscription.requests, 'post') as post:
         with pytest.raises(subscription.SubscriptionError, match='已取消'):
-            subscription.stream_full_translation(
+            subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, connection.selected_model,
                 article.full_content, lambda _delta: None, execution_guard=guard,
             )

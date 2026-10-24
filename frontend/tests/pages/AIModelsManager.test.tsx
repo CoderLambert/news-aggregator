@@ -49,6 +49,11 @@ async function ready() {
   const summary = screen.getByText('添加模型', { exact: true }).closest('summary')!
   if (!summary.parentElement?.hasAttribute('open')) fireEvent.click(summary)
 }
+async function runProbe(kind: 'text' | 'tools') {
+  fireEvent.click(screen.getByRole('checkbox', { name: /我确认主动测试可能产生服务商费用/ }))
+  fireEvent.click(screen.getByRole('button', { name: kind === 'text' ? '测试文本能力' : '测试工具能力' }))
+  await waitFor(() => expect(api.probeAIModel).toHaveBeenCalledOnce())
+}
 describe('T02 per-connection models and explicit billing consent', () => {
   it('keeps discovered IDs unselected until the user makes an explicit choice', async () => {
     vi.mocked(api.listAIModelCatalog).mockResolvedValue({ catalog_version: 'empty', models: [] })
@@ -122,6 +127,49 @@ describe('T02 per-connection models and explicit billing consent', () => {
     expect(viewer).toBe(3)
     expect(signal).toBeInstanceOf(AbortSignal)
     expect(api.createAIModel).not.toHaveBeenCalled()
+  })
+  it('shows a verified success only when the probe receipt supports the capability', async () => {
+    render(<AIModelsManager connection={connection} viewer={3} />)
+    await ready()
+    await runProbe('text')
+    expect(await screen.findByRole('status')).toHaveTextContent('文本能力测试通过，已验证支持。')
+    expect(api.probeAIModel).toHaveBeenCalledOnce()
+    expect(api.listAIModels).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('checkbox', { name: /我确认主动测试可能产生服务商费用/ })).not.toBeChecked()
+  })
+  it.each([
+    ['result_unknown', '网关或网络未返回可验证结果'],
+    ['incomplete_or_invalid', '模型返回了不完整或无法验证的响应'],
+  ])('shows an explicit warning for a completed %s probe without retrying', async (safeErrorCode, message) => {
+    vi.mocked(api.probeAIModel).mockResolvedValue({
+      attempt_id: 'synthetic-attempt', request_id: 'synthetic-request', model_id: model.model_id,
+      probe_kind: 'tools', status: 'unknown', capability: 'unknown', stale: false,
+      safe_error_code: safeErrorCode, input_tokens: null, output_tokens: null, latency_ms: 1,
+      billing_notice: 'provider_may_bill',
+    })
+    render(<AIModelsManager connection={connection} viewer={3} />)
+    await ready()
+    await runProbe('tools')
+    expect(await screen.findByRole('status')).toHaveTextContent(message)
+    expect(screen.getByRole('status')).toHaveTextContent('不会自动重试')
+    expect(screen.getByRole('status')).toHaveClass('border-amber-500/25')
+    expect(api.probeAIModel).toHaveBeenCalledOnce()
+    expect(api.listAIModels).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('checkbox', { name: /我确认主动测试可能产生服务商费用/ })).not.toBeChecked()
+  })
+  it('shows a verified unsupported result without presenting it as success', async () => {
+    vi.mocked(api.probeAIModel).mockResolvedValue({
+      attempt_id: 'synthetic-attempt', request_id: 'synthetic-request', model_id: model.model_id,
+      probe_kind: 'tools', status: 'unsupported', capability: 'unsupported', stale: false,
+      safe_error_code: '', input_tokens: 4, output_tokens: 1, latency_ms: 20,
+      billing_notice: 'provider_may_bill',
+    })
+    render(<AIModelsManager connection={connection} viewer={3} />)
+    await ready()
+    await runProbe('tools')
+    expect(await screen.findByRole('status')).toHaveTextContent('工具调用能力测试完成，已验证不支持。')
+    expect(screen.getByRole('status')).toHaveClass('border-amber-500/25')
+    expect(screen.queryByText(/测试通过/)).toBeNull()
   })
   it('saving a new model does not invoke a paid probe', async () => {
     render(<AIModelsManager connection={connection} viewer={3} />)

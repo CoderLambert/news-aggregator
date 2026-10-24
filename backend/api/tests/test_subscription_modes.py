@@ -20,6 +20,7 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from api.models import ChatGPTAuthAttempt, ChatGPTSubscriptionConnection
 from api.services import chatgpt_subscription as subscription
+from api.services import chatgpt_subscription_llm as subscription_llm
 from api.subscription_views import ChatGPTSubscriptionConnectView, ChatGPTSubscriptionStatusView
 
 User = get_user_model()
@@ -131,10 +132,10 @@ def test_network_entries_fail_closed_before_secrets_or_network(
             lambda: subscription.access_token_for(connection),
             lambda: subscription.discover_models(connection),
             lambda: subscription._revoke_refresh_token('refresh-token', 'client'),
-            lambda: subscription.stream_full_translation(
+            lambda: subscription_llm.stream_full_translation(
                 connection.pk, connection.generation, 'visible-model', 'article', lambda _: None,
             ),
-            lambda: list(subscription.stream_chat_response(
+            lambda: list(subscription_llm.stream_chat_response(
                 connection, [{'role': 'user', 'content': 'hello'}],
             )),
         ]

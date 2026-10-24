@@ -637,10 +637,13 @@ class ResearchSessionSerializer(serializers.ModelSerializer):
         snapshot = native.get('execution_snapshot')
         if not isinstance(snapshot, dict):
             return None
-        model = snapshot.get('model', {})
-        if not isinstance(model, dict) or not model.get('model_config_id'):
+        from api.services.research.execution import (
+            ResearchExecutionError, research_model_payload,
+        )
+        try:
+            return research_model_payload(snapshot, owner_id=obj.user_id)
+        except ResearchExecutionError:
             return None
-        return {key: model.get(key) for key in ('model_config_id', 'model_id')}
 
     class Meta:
         model = ResearchSession

@@ -9,9 +9,9 @@ const InitialLazyResearchPanel = lazy(loadResearchPanel)
 
 export default function ResearchLauncher() {
   const { enabled: researchEnabled } = useCapability('research')
-  const { enabled: byokCreateEnabled } = useCapability('research_byok_create')
-  const enabled = researchEnabled || byokCreateEnabled
-  const byokCreateOnly = !researchEnabled && byokCreateEnabled
+  const { enabled: authorizedCreateEnabled } = useCapability('research_byok_create')
+  const enabled = researchEnabled || authorizedCreateEnabled
+  const authorizedCreateOnly = !researchEnabled && authorizedCreateEnabled
   const [open, setOpen] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [LazyResearchPanel, setLazyResearchPanel] = useState(() => InitialLazyResearchPanel)
@@ -61,7 +61,7 @@ export default function ResearchLauncher() {
           )}
         >
           <Suspense fallback={<LazyModalState label="新闻研究助手" message="正在打开研究助手…" onClose={handleClose} variant="research" />}>
-            <LazyResearchPanel onClose={handleClose} byokCreateOnly={byokCreateOnly} />
+            <LazyResearchPanel onClose={handleClose} authorizedCreateOnly={authorizedCreateOnly} />
           </Suspense>
         </ErrorBoundary>
       )}

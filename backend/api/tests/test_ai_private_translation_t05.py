@@ -483,7 +483,7 @@ class PrivateTranslationTests(TransactionTestCase):
         task = self.queued()
         key = ('byok:' + str(task.pk), task.generation)
         try:
-            with patch.object(subscription_jobs, 'submit_background_task') as submit:
+            with patch.object(subscription_jobs, 'submit_translation_task') as submit:
                 service._dispatch(task.pk, task.generation)
                 service._dispatch(task.pk, task.generation)
             submit.assert_called_once()

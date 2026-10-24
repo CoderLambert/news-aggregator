@@ -6,7 +6,7 @@ tags:
   - Django
   - 项目案例
 project: news-aggregator
-updated: 2026-10-10
+updated: 2026-10-24
 ---
 
 # News Aggregator：OpenAI OAuth 与 ChatGPT 订阅登录方案
@@ -69,6 +69,29 @@ News Aggregator 使用 OpenAI 的开源应用 Sign in with ChatGPT 流程，让�
 2. 不同 News Aggregator 用户的 client、Token、活动账号和模型选择互不共享。
 
 2026-10-10 新增 [独立共享文章译文](shared-article-translations.md)：仅将完整的公开文章翻译结果复制到独立表，供其他读者复用。首位生成者承担模型用量；其他用户读取公共副本不调用模型。个人重新翻译保留在当前用户/连接的私有记录中，不覆盖已有公共版本；凭据隔离规则继续适用。
+
+### 模型调用与深度研究能力
+
+订阅授权成功只证明账号和 `chatgpt.tokens.use.direct` 范围可用，不证明当前所选模型支持工具调用。新闻问答、问题推荐和全文翻译通过独立的订阅 Responses 适配器执行；深度研究还必须在订阅设置中由用户明确确认后，对当前活动连接和模型发起一次强制函数调用验证。
+
+验证结果保存为不可变、无密钥的 `ChatGPTSubscriptionCapabilityReceipt`，绑定连接 generation、模型 slug 和能力类型。只有当前连接、当前 generation、当前模型存在 `supported` 回执时，AI 设置才允许把 `deep_research` 显式绑定到 ChatGPT Subscription。切换模型、切换账号、撤销或重授权导致连接 generation 变化后都会 fail closed；文本能力不会被当作工具能力。
+
+研究任务保存秘密无关的执行快照：来源、owner、连接 generation、模型和能力回执 ID。首轮和每次续问都要求明确的来源与本次同意；Worker 在调用前、工具执行期间和提交结果时复核快照。Responses API 始终使用 `stream: true`、`store: false`，服务端保留原生 function-call/output items 以安全续接，不使用 `previous_response_id`。ChatGPT Subscription 的流式终态可能不重复携带 `output`，此时只从同一条已完成流里按连续 `output_index` 重建 `response.output_item.done`，仍由原生 Responses 校验器验证后使用。选择订阅后不会回退到 BYOK、站点 Key 或其他模型，失败也不会自动重发。
+
+工具能力验证属于可能超过普通 API 十秒窗口的同步模型调用，前端使用与后端 provider 上限匹配的长请求预算，不能因客户端先超时而自动重发。深度研究的终端失败会显示服务端保存的安全原因；只有响应头前无法确认是否到达服务端的请求才显示“可能已到达服务器”。完成事件后，界面持续以流式快照显示结果，直到 owner-scoped 会话 DTO 包含已提交回答，再切换到持久化内容。
+
+文章页按 `full_translation` 的有效来源路由翻译：显式 ChatGPT Subscription 选择优先于 BYOK 全局默认，只有有效来源为 BYOK 时才进入个人 Key 翻译队列。这样不会因另一个用途的默认模型遮蔽已保存的订阅翻译选择，也不会新增隐式来源回退。
+
+订阅全文翻译任务在 SQLite WAL 下以写入预留开始 claim 事务，再读取并复核 owner、连接 generation、模型和正文快照，最后通过条件更新取得租约。正文是否可读由统一 stored-reader 授权（包括已授权的 `available` 正文），最终 CAS 精确匹配快照中的正文和状态，而不是维护另一份状态白名单。这样竞争写入只能在读取快照前等待，不能把已读取的 WAL 快照升级成 `SQLITE_BUSY_SNAPSHOT`；模型调用仍在短事务之外执行。
+
+订阅/BYOK 全文翻译与深度研究使用相互独立的有界执行器，研究任务占满容量时不会阻塞翻译 claim。翻译 SSE 在排队后立即发送空进度帧以提交响应头，之后只附着同一 durable task；断开连接不会取消或重复提交模型调用。
+
+相关入口：
+
+- `POST /api/chatgpt-subscription/connections/{id}/research-probe/`：请求体只能是 `{\"consent\": true}`；主动验证可能使用订阅额度。
+- `GET/PATCH /api/me/ai/task-preferences/`：`deep_research` 可显式选择 `chatgpt_subscription`，但必须已有当前工具能力回执。
+- `POST /api/research/` 与续问接口：订阅研究使用 `execution_source=chatgpt_subscription` 和字面量 `consent=true`，不得同时发送 BYOK `model_config_id`。
+
 
 ### 官方推荐的三个用户动作
 
@@ -162,7 +185,7 @@ sequenceDiagram
 | 同一个 ChatGPT Plus 账号用于本网站和其他相关应用 | 五小时使用限额在这些应用间累计，不是每个应用各获一份 |
 | 用户共用服务器或 host ID，但授权的是不同 ChatGPT 账号 | 不会仅因服务器或 host 相同而把订阅额度合并 |
 
-当前代码通过 `active_connection_for_user(request.user)` 选取用户自己的连接，随后使用该连接的 access token 调用 Responses API；并未统一使用管理员订阅。依据：`backend/api/services/chatgpt_subscription.py:645-658`、`1133-1170`，`backend/api/views.py:938-966`。没有选择活动订阅时，部分功能仍走已有的服务端模型提供商配置；这属于另一条调用路径，不代表使用其他网站用户的 ChatGPT Token。
+当前代码通过 `active_connection_for_user(request.user)` 选取用户自己的连接，随后使用该连接的 access token 调用 Responses API；并未统一使用管理员订阅。各 AI 用途显式保存来源，选择 ChatGPT Subscription 后不会回退到其他网站用户的 Token、BYOK 或站点 Key；来源未授权或能力未验证时直接拒绝。
 
 公网网站通常可以使用一个应用级 OAuth client ID 接收多个用户的授权。共享应用 client ID 与共享用户 Token 是两件事；用户的身份、Token 和连接仍须分开保存。当前本地动态注册中保存的“每次用户/Workspace 注册的 client ID”，不能直接当作正式网站获批的应用 client ID。
 
@@ -182,7 +205,7 @@ OpenAI 的开源流程文档明确面向开源和本地托管应用，并将付�
 
 ### 身份登录不等于订阅调用权限
 
-`openid profile email` 用于验证身份，不自动授予 AI 推理或订阅使用权限。申请时需明确 News Aggregator 的需求：多个网站用户分别授权自己的 ChatGPT 订阅，用于问答、推荐问题和全文翻译。
+`openid profile email` 用于验证身份，不自动授予 AI 推理或订阅使用权限。申请时需明确 News Aggregator 的需求：多个网站用户分别授权自己的 ChatGPT 订阅，用于问答、推荐问题、全文翻译和经工具能力验证的深度研究。
 
 公网订阅调用的 scopes、resource、端点和 Token 使用方式须按 OpenAI 为该集成开通的契约实现。当前开源模式中的 `chatgpt.tokens.use.direct` 不能仅靠添加到网站登录 URL 就使一个身份客户端获得订阅权限。
 

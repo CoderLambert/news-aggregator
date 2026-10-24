@@ -94,20 +94,27 @@ class PublicPolicyMiddleware:
                 return policy_error('semantic_search_disabled')
         if route_name == 'auth-register' and not settings.PUBLIC_SIGNUP_ENABLED:
             return policy_error('signup_disabled')
-        byok_research_create = (
+        authorized_research_create = (
             route_name in {'research-create', 'research-chat'}
             and request.method == 'POST'
             and settings.PUBLIC_SITE_MODE == 'full'
-            and getattr(settings, 'AI_BYOK_ENABLED', False)
+            and (
+                getattr(settings, 'AI_BYOK_ENABLED', False)
+                or (
+                    getattr(settings, 'CHATGPT_AUTH_MODE', 'disabled') == 'local_oss'
+                    and settings.DJANGO_ENV != 'production'
+                    and getattr(settings, 'CHATGPT_PLAN_USAGE_ENABLED', False)
+                )
+            )
         )
         if (not settings.PUBLIC_AI_ENABLED
                 and request.method in AI_GATED_METHODS.get(route_name, ())
-                and not byok_research_create):
+                and not authorized_research_create):
             return policy_error('ai_disabled')
         if (settings.DJANGO_ENV == 'production'
                 and route_name in {'research-create', 'research-chat'}
                 and request.method == 'POST'
-                and not byok_research_create):
+                and not authorized_research_create):
             return policy_error('hosted_integration_unapproved', status_code=503)
         if route_name.startswith('chatgpt-subscription-'):
             auth_mode = settings.CHATGPT_AUTH_MODE
