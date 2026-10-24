@@ -594,10 +594,10 @@ def _dispatch_task(task_id, generation):
             return
         _dispatching.add(key)
     try:
-        future = submit_translation_task(_run_persistent_task, task_id, generation)
+        submit_translation_task(_run_persistent_task, task_id, generation)
         logger.info(
-            'ChatGPT translation dispatch submitted (task_id=%s, generation=%s, running=%s, done=%s).',
-            task_id, generation, future.running(), future.done(),
+            'ChatGPT translation dispatch submitted (task_id=%s, generation=%s).',
+            task_id, generation,
         )
     except Exception as exc:
         with _jobs_lock:
