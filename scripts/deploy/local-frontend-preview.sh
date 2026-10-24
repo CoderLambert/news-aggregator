@@ -200,10 +200,10 @@ fi
 
 restore_configuration() {
     if [[ -n "$old_current" ]]; then
-        "${BASE_COMPOSE[@]}" -f "$old_current" up -d --no-deps --force-recreate --wait \
+        "${BASE_COMPOSE[@]}" -f "$old_current" up -d --no-deps --force-recreate --no-build --pull never --wait \
             --wait-timeout "$WAIT_TIMEOUT" "${RECREATE_SERVICES[@]}"
     else
-        "${BASE_COMPOSE[@]}" up -d --no-deps --force-recreate --wait \
+        "${BASE_COMPOSE[@]}" up -d --no-deps --force-recreate --no-build --pull never --wait \
             --wait-timeout "$WAIT_TIMEOUT" "${RECREATE_SERVICES[@]}"
     fi
 }
@@ -214,7 +214,8 @@ restore_and_fail() {
     fail "$message"
 }
 
-if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --wait --wait-timeout "$WAIT_TIMEOUT" "${RECREATE_SERVICES[@]}"; then
+if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --no-build --pull never --wait \
+    --wait-timeout "$WAIT_TIMEOUT" "${RECREATE_SERVICES[@]}"; then
     restore_and_fail 'frontend preview activation failed; attempted to restore the previous app configuration.'
 fi
 

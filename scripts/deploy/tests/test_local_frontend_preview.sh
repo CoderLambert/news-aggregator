@@ -121,6 +121,8 @@ PATH="$TMP/bin:$PATH" "$SCRIPT" --execute \
 activation=$(grep ' up -d ' "$FAKE_DOCKER_LOG" | tail -1)
 [[ "$activation" == *' app ai-gateway channel-worker translation-redis' ]] \
     || fail "activation did not recreate app network sidecars: $activation"
+[[ "$activation" == *' --no-build --pull never '* ]] \
+    || fail "activation allowed an implicit image build or pull: $activation"
 
 : > "$FAKE_DOCKER_LOG"
 touch "$FAKE_DOCKER_FAIL_NEXT"
@@ -136,6 +138,10 @@ mapfile -t recovery_commands < <(grep ' up -d ' "$FAKE_DOCKER_LOG")
     || fail "failed activation omitted app network sidecars: ${recovery_commands[0]}"
 [[ "${recovery_commands[1]}" == *' app ai-gateway channel-worker translation-redis' ]] \
     || fail "restore omitted app network sidecars: ${recovery_commands[1]}"
+[[ "${recovery_commands[0]}" == *' --no-build --pull never '* ]] \
+    || fail "failed activation allowed an implicit image build or pull: ${recovery_commands[0]}"
+[[ "${recovery_commands[1]}" == *' --no-build --pull never '* ]] \
+    || fail "restore allowed an implicit image build or pull: ${recovery_commands[1]}"
 
 : > "$FAKE_DOCKER_LOG"
 cat > "$FAKE_DOCKER_CONFIG" <<'JSON'
