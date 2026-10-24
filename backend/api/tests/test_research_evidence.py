@@ -97,3 +97,56 @@ def test_chat_article_and_search_snippets_cannot_become_system_instructions(monk
     assert 'javascript:' not in observed[1]['content']
     assert 'https://example.com/official' in observed[1]['content']
     assert 'javascript:' not in wire
+
+
+def test_truncate_search_news_preserves_replayable_article_envelope():
+    """Oversized search_news results must shrink by dropping hits, not `_summary`.
+
+    Live failure path: DeepSeek tools returned search_news with limit=15 (~11KiB).
+    Legacy truncate collapsed the payload to {_summary, context_scope}; persist then
+    failed require_session_evidence (Http404) and the worker raised tool_failed.
+    """
+    import json
+    from api.services.research.tools import _MAX_RESULT_CHARS, _truncate_result
+
+    articles = []
+    for index in range(20):
+        articles.append({
+            'id': index + 1,
+            'title': ('标题' * 20) + str(index),
+            'original_title': '',
+            'source': 'publisher.example',
+            'source_type': 'news',
+            'category': '科技',
+            'url': f'https://publisher.example/story-{index}',
+            'snippet': ('摘要内容' * 40),
+            'publish_time': '2026-10-24T00:00:00+00:00',
+            'context_scope': 'summary',
+            'full_content_revision': 1,
+            'canonical_hash': f'{index:064d}',
+            'content_completeness': 'summary',
+            'provenance_hash': f'{index + 100:064d}',
+            'source_scope': 'summary',
+            'policy_versions': {'1': 1},
+        })
+    payload = {
+        'articles': articles,
+        'total': len(articles),
+        'query': 'LLM Agent 智能体 新进展',
+        'mode': 'hybrid',
+        'order_by': 'time',
+        'variations_used': ['LLM Agent 智能体 新进展', 'LLM Agent'],
+    }
+    assert len(json.dumps(payload, ensure_ascii=False)) > _MAX_RESULT_CHARS
+
+    truncated = _truncate_result(payload)
+    assert '_summary' not in truncated
+    assert isinstance(truncated.get('articles'), list)
+    assert truncated['total'] == len(truncated['articles'])
+    assert 0 < len(truncated['articles']) < len(articles)
+    assert len(json.dumps(truncated, ensure_ascii=False)) <= _MAX_RESULT_CHARS
+    required = {
+        'id', 'title', 'url', 'snippet', 'canonical_hash',
+        'source_scope', 'policy_versions', 'context_scope',
+    }
+    assert required.issubset(truncated['articles'][0])

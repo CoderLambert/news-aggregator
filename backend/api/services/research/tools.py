@@ -416,28 +416,105 @@ def _save_search_result(session, tool_name: str, args: dict, result: dict, guard
 # ── Helper: truncate large results ──────────────────────────────────────────
 
 def _truncate_result(result: dict) -> dict:
-    """Ensure the JSON-serialized result does not exceed _MAX_RESULT_CHARS.
+    """Keep tool results under _MAX_RESULT_CHARS without destroying evidence shape.
 
-    Uses head+tail preservation for text fields and caps list length at 20.
+    Persisted research tool rows are re-checked by result_is_current after write.
+    Collapsing search_news/analyze_topic payloads into a free-form `_summary`
+    makes that check fail, so the post-persist execution guard raises Http404 and
+    the worker surfaces tool_failed even though search itself succeeded.
     """
-    text = json.dumps(result, ensure_ascii=False)
-    if len(text) <= _MAX_RESULT_CHARS:
+    if not isinstance(result, dict):
         return result
-    # Truncate large text fields with head+tail preservation
+    encoded = json.dumps(result, ensure_ascii=False)
+    if len(encoded) <= _MAX_RESULT_CHARS:
+        return result
+
+    # Copy before mutating nested containers shared with the caller.
+    result = dict(result)
+
+    def _size(payload: dict) -> int:
+        return len(json.dumps(payload, ensure_ascii=False))
+
+    if isinstance(result.get('articles'), list):
+        articles = list(result['articles'])
+        while _size({**result, 'articles': articles}) > _MAX_RESULT_CHARS and articles:
+            articles.pop()
+        result['articles'] = articles
+        if isinstance(result.get('total'), int):
+            result['total'] = len(articles)
+        if isinstance(result.get('total_articles'), int):
+            result['total_articles'] = len(articles)
+
+    if isinstance(result.get('results'), list):
+        rows = list(result['results'])
+        while _size({**result, 'results': rows}) > _MAX_RESULT_CHARS and rows:
+            rows.pop()
+        result['results'] = rows
+
+    if isinstance(result.get('timeline'), list):
+        timeline = []
+        for day in result['timeline']:
+            if isinstance(day, dict):
+                copied = dict(day)
+                if isinstance(copied.get('events'), list):
+                    copied['events'] = list(copied['events'])
+                timeline.append(copied)
+            else:
+                timeline.append(day)
+        while _size({**result, 'timeline': timeline}) > _MAX_RESULT_CHARS and timeline:
+            last = timeline[-1]
+            if isinstance(last, dict) and isinstance(last.get('events'), list) and last['events']:
+                last['events'].pop()
+                if not last['events']:
+                    timeline.pop()
+            else:
+                timeline.pop()
+        result['timeline'] = timeline
+
+    if _size(result) <= _MAX_RESULT_CHARS:
+        return result
+
+    # Truncate large text fields with head+tail preservation (fetch_article etc.)
     for key, val in list(result.items()):
         if isinstance(val, str) and len(val) > 1000:
-            head = val[:600]
-            tail = val[-200:]
-            result[key] = head + '...[内容已截断]...' + tail
+            result[key] = val[:600] + '...[内容已截断]...' + val[-200:]
             if key == 'content':
                 result['context_scope'] = 'excerpt'
                 result['content_truncated'] = True
-        elif isinstance(val, list):
-            result[key] = val[:20]  # Cap list length
-    text = json.dumps(result, ensure_ascii=False)
-    if len(text) > _MAX_RESULT_CHARS:
-        result = {'_summary': text[:_MAX_RESULT_CHARS - 20] + '...[truncated]', 'context_scope': 'excerpt'}
-    return result
+        elif isinstance(val, list) and key not in {'articles', 'results', 'timeline'}:
+            result[key] = val[:20]
+
+    if _size(result) <= _MAX_RESULT_CHARS:
+        return result
+
+    # Evidence-bearing envelopes must stay structured for replay validation.
+    if any(key in result for key in ('articles', 'timeline', 'results')):
+        empty = {
+            key: value for key, value in result.items()
+            if key not in {'articles', 'timeline', 'results'}
+        }
+        if 'articles' in result:
+            empty['articles'] = []
+            if 'total' in result:
+                empty['total'] = 0
+            if 'total_articles' in result:
+                empty['total_articles'] = 0
+        if 'timeline' in result:
+            empty['timeline'] = []
+        if 'results' in result:
+            empty['results'] = []
+        return empty if _size(empty) <= _MAX_RESULT_CHARS else {
+            'articles': [],
+            'total': 0,
+            'query': result.get('query', '') if isinstance(result.get('query'), str) else '',
+            'mode': result.get('mode', 'hybrid') if isinstance(result.get('mode'), str) else 'hybrid',
+        }
+
+    encoded = json.dumps(result, ensure_ascii=False)
+    return {
+        '_summary': encoded[:_MAX_RESULT_CHARS - 20] + '...[truncated]',
+        'context_scope': 'excerpt',
+    }
 
 
 # ── SSRF protection: blocked URL patterns ───────────────────────────────────
