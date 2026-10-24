@@ -49,6 +49,25 @@ scripts/deploy/deploy.sh \
 
 静态导出助手默认只打印 dry-run 计划，不连接 Docker。生产发布流程由 `deploy.sh` 在当前数据库快照、迁移、app 与 worker health checks 全部通过后调用它。不要单独执行导出并切换生产静态版本。每个 release 只包含自己的真实静态文件与 asset 硬链接，公共目录/文件权限固定为目录 `0755`、文件 `0644`；共享旧资源不会进入其他 release 的摘要。同名资源内容不一致时拒绝覆盖。`current` 和 `previous` 通过同目录临时 symlink 原子替换，旧 release 不删除。
 
+## 本地完整运行时：app 网络单元锁步
+
+`compose.local-full.yaml` 中 `ai-gateway`、`translation-redis`、`channel-worker` 使用 `network_mode: service:app`，与 app 共享网络命名空间（BYOK 环回网关边界）。单独 `docker compose up --force-recreate app` / `docker restart` 后只重建 app 容器，会让侧车留在旧 netns，表现为 `127.0.0.1:4000 Connection refused` 与探针 `result_unknown`。
+
+日维与代码/镜像更新请使用统一入口（默认 dry-run，确认后加 `--execute`）：
+
+```sh
+# 查看将一起操作的服务
+scripts/deploy/newshub-local list-unit --project newshub-local-main
+
+# 强制重建整个 app 网络单元，并在 app netns 内核对 gateway liveliness=200
+scripts/deploy/newshub-local recreate-app --project newshub-local-main --execute
+
+# 仅重启进程（同容器/同 netns）时也走同一单元
+scripts/deploy/newshub-local restart-app --project newshub-local-main --execute
+```
+
+完整候选激活仍用 `scripts/deploy/local-full-runtime.sh --execute ...`：它在一次 Compose 事务里 `--force-recreate` 全部必需服务，并在 `runtime_health` 之后做 gateway liveliness 自检。纯前端预览继续用 `local-frontend-preview.sh`，同样会展开侧车单元。不要对 app 单独执行 recreate。
+
 ## 本地前端动态预览（非生产发布）
 
 纯前端改动可用 `scripts/deploy/local-frontend-preview.sh` 复用宿主现有 Node 22 与 `frontend/node_modules`，生成内容寻址的静态 release，并以只读 bind mount 覆盖本地 app 容器的 `/app/frontend/dist`。脚本默认仅打印计划；`--execute` 才会校验 Compose、构建前端，并把指定 app 与合并 Compose 配置中所有 `network_mode: service:app` 的侧车作为同一重建单元。激活与失败回滚使用相同的服务集合，避免 app 单独重建后侧车继续绑定已经失效的网络命名空间。它核对重建前后镜像 ID 不变、挂载路径精确且只读，并为当前/上一份 override 保存原子 symlink；激活或核对失败时恢复之前的 app 配置。release 根目录必须位于源码树之外，因此可供同一机器上的多个分支复用而不会把产物写回工作树。

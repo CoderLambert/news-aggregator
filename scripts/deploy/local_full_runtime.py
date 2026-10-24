@@ -28,11 +28,27 @@ import urllib.parse
 import urllib.request
 import uuid
 
+try:
+    from scripts.deploy.app_network_unit import (
+        AppNetworkUnitError,
+        expand_services_for_app_action,
+        recreate_unit,
+        verify_gateway_liveliness,
+    )
+except ImportError:  # python scripts/deploy/local_full_runtime.py
+    from app_network_unit import (
+        AppNetworkUnitError,
+        expand_services_for_app_action,
+        recreate_unit,
+        verify_gateway_liveliness,
+    )
+
 
 REQUIRED_SERVICES = (
     'app', 'indexer', 'translation-redis', 'rss-db', 'miniflux',
     'ai-gateway-db', 'ai-gateway', 'rss-sync', 'channel-worker',
 )
+APP_NETWORK_UNIT_TARGET = 'app'
 INFRASTRUCTURE_SERVICES = REQUIRED_SERVICES[:7]
 REQUIRED_HEALTH_CHECKS = (
     'database', 'rss_worker', 'rss_engine', 'channel_worker', 'search_index',
@@ -92,6 +108,67 @@ def activation_commands(*, project: str, compose_files: tuple[Path, ...],
         stop_new=current + ['stop', '--timeout', '45', *reversed(REQUIRED_SERVICES)],
         rollback=old + up + list(previous_services),
     )
+
+
+def require_app_network_unit(services_document: dict, planned: tuple[str, ...] | list[str]) -> list[str]:
+    """Ensure planned recreate/restart sets include every service:app sidecar."""
+    try:
+        unit = recreate_unit(services_document, APP_NETWORK_UNIT_TARGET)
+    except AppNetworkUnitError as error:
+        raise LocalRuntimeError(str(error)) from error
+    planned_list = list(planned)
+    try:
+        expanded = expand_services_for_app_action(
+            planned_list, unit, target=APP_NETWORK_UNIT_TARGET)
+    except AppNetworkUnitError as error:
+        raise LocalRuntimeError(str(error)) from error
+    missing = [name for name in unit if name not in planned_list]
+    if missing:
+        raise LocalRuntimeError(
+            'planned services omit app network unit members: ' + ', '.join(missing)
+        )
+    if expanded[:len(unit)] != unit:
+        raise LocalRuntimeError('app network unit must stay contiguous at recreate time')
+    return unit
+
+
+def _verify_gateway_liveliness_for_activation(compose: list[str], environment, timeout: int = 30) -> None:
+    # Reuse argv already built for this activation; strip to project/files/env.
+    if compose[:2] != ['docker', 'compose']:
+        raise LocalRuntimeError('compose command prefix is invalid')
+    project = None
+    files: list[Path] = []
+    env_file = None
+    project_directory = None
+    index = 2
+    while index < len(compose):
+        item = compose[index]
+        if item == '-p' and index + 1 < len(compose):
+            project = compose[index + 1]
+            index += 2
+            continue
+        if item == '-f' and index + 1 < len(compose):
+            files.append(Path(compose[index + 1]))
+            index += 2
+            continue
+        if item == '--env-file' and index + 1 < len(compose):
+            env_file = Path(compose[index + 1])
+            index += 2
+            continue
+        if item == '--project-directory' and index + 1 < len(compose):
+            project_directory = Path(compose[index + 1])
+            index += 2
+            continue
+        break
+    if not project or not files:
+        raise LocalRuntimeError('could not derive compose identity for gateway self-check')
+    try:
+        verify_gateway_liveliness(
+            project=project, compose_files=files, env_file=env_file,
+            project_directory=project_directory, environment=environment, timeout=timeout,
+        )
+    except AppNetworkUnitError as error:
+        raise LocalRuntimeError(str(error)) from error
 
 
 class SecretStore:
@@ -808,6 +885,12 @@ def _execute(*, project: str, code_root: Path, source_root: Path,
     compose = _compose(project, compose_files, env_file, source_root)
     environment = {**os.environ, **values}
     _run(compose + ['config', '--quiet'], environment=environment)
+    merged_services = json.loads(
+        _run(compose + ['config', '--format', 'json'], environment=environment).stdout
+    ).get('services')
+    if not isinstance(merged_services, dict):
+        raise LocalRuntimeError('merged Compose config has no services')
+    require_app_network_unit(merged_services, REQUIRED_SERVICES)
     images = _run(compose + ['config', '--images'], environment=environment).stdout.splitlines()
     for candidate in sorted(set(filter(None, images))):
         _run(['docker', 'image', 'inspect', candidate])
@@ -841,6 +924,7 @@ def _execute(*, project: str, code_root: Path, source_root: Path,
         _run(commands.full, environment=environment, timeout=wait_timeout + 180)
         health_result = _run(commands.verify, environment=environment, timeout=60)
         snapshot = _parse_runtime_health_stdout(health_result.stdout)
+        _verify_gateway_liveliness_for_activation(compose, environment)
         receipt = {
             'schema_version': 4,
             'project': project,

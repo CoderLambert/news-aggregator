@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Operator entrypoint for local full-runtime day-2 actions.
+# Recreate/restart of app always expands to network_mode:service:app sidecars.
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [[ -x /usr/bin/python3 ]] && /usr/bin/python3 -c 'import sys' >/dev/null 2>&1; then
+  PYTHON=(/usr/bin/python3)
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; then
+  PYTHON=(python3)
+else
+  printf 'newshub-local: python3 is required\n' >&2
+  exit 2
+fi
+exec "${PYTHON[@]}" "$SCRIPT_DIR/app_network_unit.py" "$@"

@@ -1,8 +1,15 @@
 # Required local manual-acceptance runtime. Combine with compose.yaml under
 # project newshub-local-main through scripts/deploy/local-full-runtime.sh.
+#
+# App network unit: ai-gateway, translation-redis, and channel-worker use
+# network_mode: service:app. Never recreate/restart app alone — use
+# scripts/deploy/newshub-local recreate-app|restart-app (or local-full-runtime /
+# local-frontend-preview), which always expand to the full unit.
 services:
   app:
     image: "${NEWSHUB_IMAGE:?set an exact local image}"
+    labels:
+      newshub.app_network_unit: primary
     env_file:
       - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
         required: false
@@ -76,6 +83,8 @@ services:
       FULL_CONTENT_WORKER_LOCK: /app/logs/full-content.lock
       FULL_CONTENT_WORKER_HEARTBEAT: /app/logs/full-content-heartbeat.json
     network_mode: service:app
+    labels:
+      newshub.app_network_unit: sidecar
     volumes:
       - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
       - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
@@ -100,6 +109,8 @@ services:
   translation-redis:
     image: redis:8.10.2@sha256:2c2dff791878316e3b083188be0d578423b24813cdda5de0e80ea4f7b3e6bfd6
     network_mode: service:app
+    labels:
+      newshub.app_network_unit: sidecar
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - 'exec redis-server --bind 127.0.0.1 --protected-mode yes --requirepass "$$(cat /run/secrets/translation_redis_password)" --save "" --appendonly no --maxmemory 192mb --maxmemory-policy noeviction'
@@ -258,6 +269,8 @@ services:
       - litellm_salt_key
       - ai_byok_gateway_project_key
     network_mode: service:app
+    labels:
+      newshub.app_network_unit: sidecar
     depends_on:
       app:
         condition: service_started

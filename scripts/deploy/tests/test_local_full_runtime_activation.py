@@ -8,6 +8,21 @@ from scripts.deploy import local_full_runtime
 from scripts.deploy import ai_gateway_bootstrap
 
 
+MERGED_COMPOSE_JSON = json.dumps({
+    'services': {
+        'app': {},
+        'indexer': {},
+        'translation-redis': {'network_mode': 'service:app'},
+        'rss-db': {},
+        'miniflux': {},
+        'ai-gateway-db': {},
+        'ai-gateway': {'network_mode': 'service:app'},
+        'rss-sync': {},
+        'channel-worker': {'network_mode': 'service:app'},
+    },
+})
+
+
 def test_secret_store_creates_private_values_once_and_rejects_symlinks(tmp_path):
     root = tmp_path / 'runtime'
     store = local_full_runtime.SecretStore(root)
@@ -366,11 +381,15 @@ def test_activation_failure_stops_new_services_and_restores_previous_compose(tmp
                         lambda **_kwargs: tmp_path / 'bundle')
     monkeypatch.setattr(local_full_runtime, '_bootstrap_miniflux', lambda *_args: 2)
     monkeypatch.setattr(local_full_runtime, '_bootstrap_ai_gateway', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_verify_gateway_liveliness_for_activation',
+                        lambda *_args, **_kwargs: None)
 
     def command(arguments, **_kwargs):
         calls.append(arguments)
         if arguments[:3] == ['docker', 'image', 'inspect']:
             return type('Result', (), {'stdout': '[]', 'returncode': 0})()
+        if arguments[-3:] == ['config', '--format', 'json']:
+            return type('Result', (), {'stdout': MERGED_COMPOSE_JSON + '\n', 'returncode': 0})()
         if arguments[-2:] == ['config', '--images']:
             return type('Result', (), {'stdout': candidate + '\n', 'returncode': 0})()
         if 'up' in arguments and arguments[-2:] == ['rss-sync', 'channel-worker']:
@@ -415,6 +434,8 @@ def test_partial_infrastructure_failure_also_restores_previous_compose(tmp_path,
         calls.append(arguments)
         if arguments[:3] == ['docker', 'image', 'inspect']:
             return type('Result', (), {'stdout': '[]', 'returncode': 0})()
+        if arguments[-3:] == ['config', '--format', 'json']:
+            return type('Result', (), {'stdout': MERGED_COMPOSE_JSON + '\n', 'returncode': 0})()
         if arguments[-2:] == ['config', '--images']:
             return type('Result', (), {'stdout': candidate + '\n', 'returncode': 0})()
         if 'up' in arguments and arguments[-2:] == ['ai-gateway-db', 'ai-gateway']:
@@ -476,6 +497,8 @@ def test_repeat_activation_quiesces_old_business_services_before_infrastructure(
         calls.append(arguments)
         if arguments[:3] == ['docker', 'image', 'inspect']:
             return type('Result', (), {'stdout': '[]', 'returncode': 0})()
+        if arguments[-3:] == ['config', '--format', 'json']:
+            return type('Result', (), {'stdout': MERGED_COMPOSE_JSON + '\n', 'returncode': 0})()
         if arguments[-2:] == ['config', '--images']:
             return type('Result', (), {'stdout': candidate + '\n', 'returncode': 0})()
         if 'up' in arguments and arguments[-7:] == list(local_full_runtime.INFRASTRUCTURE_SERVICES):
@@ -521,6 +544,8 @@ def test_receipt_publish_failure_rolls_back_and_stops_all_candidate_services(tmp
                         lambda **_kwargs: tmp_path / 'bundle')
     monkeypatch.setattr(local_full_runtime, '_bootstrap_miniflux', lambda *_args: 2)
     monkeypatch.setattr(local_full_runtime, '_bootstrap_ai_gateway', lambda *_args: None)
+    monkeypatch.setattr(local_full_runtime, '_verify_gateway_liveliness_for_activation',
+                        lambda *_args, **_kwargs: None)
     monkeypatch.setattr(local_full_runtime, '_write_receipt',
                         lambda *_args: (_ for _ in ()).throw(
                             local_full_runtime.LocalRuntimeError('synthetic receipt failure')))
@@ -529,6 +554,8 @@ def test_receipt_publish_failure_rolls_back_and_stops_all_candidate_services(tmp
         calls.append(arguments)
         if arguments[:3] == ['docker', 'image', 'inspect']:
             return type('Result', (), {'stdout': '[]', 'returncode': 0})()
+        if arguments[-3:] == ['config', '--format', 'json']:
+            return type('Result', (), {'stdout': MERGED_COMPOSE_JSON + '\n', 'returncode': 0})()
         if arguments[-2:] == ['config', '--images']:
             return type('Result', (), {'stdout': candidate + '\n', 'returncode': 0})()
         if arguments[-1:] == ['runtime_health']:

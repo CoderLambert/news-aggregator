@@ -99,3 +99,18 @@ def test_ai_gateway_tmpfs_options_stay_one_absolute_mount():
     assert mounts == ['/tmp:rw,size=512m,mode=1777']
     assert all(isinstance(item, str) and item.startswith('/') for item in mounts)
     assert not any(item.startswith(('size=', 'mode=', 'rw,')) for item in mounts)
+
+
+def test_local_full_overlay_marks_app_network_unit_and_matches_required_services():
+    services = yaml.safe_load((ROOT / 'compose.local-full.yaml').read_text())['services']
+    from scripts.deploy.app_network_unit import recreate_unit
+    from scripts.deploy import local_full_runtime
+
+    assert services['app']['labels']['newshub.app_network_unit'] == 'primary'
+    unit = recreate_unit(services)
+    assert unit == ['app', 'ai-gateway', 'channel-worker', 'translation-redis']
+    for name in unit[1:]:
+        assert services[name]['labels']['newshub.app_network_unit'] == 'sidecar'
+        assert services[name]['network_mode'] == 'service:app'
+    for name in unit:
+        assert name in local_full_runtime.REQUIRED_SERVICES
