@@ -18,7 +18,7 @@ def test_secret_store_creates_private_values_once_and_rejects_symlinks(tmp_path)
     assert first.read_text() == 'sk-first-value\n'
     assert second.read_text() == 'sk-first-value\n'
     assert root.stat().st_mode & 0o777 == 0o700
-    assert first.stat().st_mode & 0o777 == 0o600
+    assert first.stat().st_mode & 0o777 == 0o444
 
     unsafe = root / 'unsafe'
     unsafe.symlink_to(first)
@@ -577,3 +577,16 @@ def test_failed_compose_output_is_written_to_protected_log(tmp_path, monkeypatch
     body = written[0].read_text()
     assert "invalid mount path: 'mode=1777'" in body
     assert 'password=super-secret-value' in body
+
+
+def test_existing_0600_secrets_are_exposed_for_non_root_consumers(tmp_path):
+    """Compose ignores secret mode/uid; Miniflux nobody needs world-readable files."""
+    root = tmp_path / 'runtime'
+    root.mkdir(mode=0o700)
+    legacy = root / 'rss-database-url'
+    legacy.write_text('postgres://example\n')
+    legacy.chmod(0o600)
+    store = local_full_runtime.SecretStore(root)
+    path = store.ensure('rss-database-url', lambda: 'unused')
+    assert path == legacy
+    assert path.stat().st_mode & 0o777 == 0o444

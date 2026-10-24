@@ -116,8 +116,12 @@ class SecretStore:
             info = path.lstat()
         except OSError:
             raise LocalRuntimeError('runtime secret must be a regular private file') from None
+        # Compose file secrets ignore uid/gid/mode. Non-root consumers such as
+        # Miniflux (nobody) need world-readable files; the secrets directory
+        # stays mode 0700 so host peers still cannot traverse to them.
+        mode = stat.S_IMODE(info.st_mode)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-                or info.st_mode & 0o077 or info.st_size < 1 or info.st_size > 65536):
+                or mode not in {0o600, 0o444} or info.st_size < 1 or info.st_size > 65536):
             raise LocalRuntimeError('runtime secret must be a regular private file')
 
     def ensure(self, name: str, factory) -> Path:
@@ -127,12 +131,18 @@ class SecretStore:
         path = self.root / name
         if path.exists() or path.is_symlink():
             self._validate(path)
+            if stat.S_IMODE(path.stat().st_mode) == 0o600:
+                try:
+                    path.chmod(0o444)
+                except OSError:
+                    raise LocalRuntimeError('could not expose runtime secret for container consumers') from None
+                self._validate(path)
             return path
         value = factory()
         if not isinstance(value, str) or not value or '\n' in value or '\r' in value:
             raise LocalRuntimeError('generated runtime secret is invalid')
         try:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
                 stream.write(value + '\n')
         except OSError:
@@ -161,7 +171,7 @@ class SecretStore:
         if temporary.exists() or temporary.is_symlink():
             raise LocalRuntimeError('runtime secret staging path is occupied')
         try:
-            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o444)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
                 stream.write(value + '\n')
                 stream.flush()
