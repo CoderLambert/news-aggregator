@@ -107,10 +107,13 @@ class SyntheticGatewayTransportTests(TestCase):
             result = self.send(kind, model_alias='deepseek/deepseek-flash')
             self.assertEqual(result.status, 'succeeded')
         self.assertEqual(len(self.server.seen), 2)
-        for _path, _bearer, payload in self.server.seen:
+        text_payload, tools_payload = self.server.seen[0][2], self.server.seen[1][2]
+        for payload in (text_payload, tools_payload):
             self.assertEqual(payload['thinking'], {'type': 'disabled'})
-            self.assertLessEqual(payload['max_tokens'], 32)
-        self.assertEqual(self.server.seen[1][2]['tool_choice'], 'auto')
+        self.assertLessEqual(text_payload['max_tokens'], 8)
+        self.assertLessEqual(tools_payload['max_tokens'], 128)
+        self.assertEqual(tools_payload['tool_choice'],
+                         {'type': 'function', 'function': {'name': 'byok_probe'}})
 
     def test_openai_probes_use_stateless_native_responses(self):
         for kind in ('text', 'tools'):
