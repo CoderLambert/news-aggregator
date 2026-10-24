@@ -11,14 +11,17 @@ from api.services.channel_topics import refresh_profiles
 from api.services.channel_ai import claim_next, execute_job, enqueue_site_sources, process_incremental_subscriptions
 
 
-def heartbeat():
+def heartbeat(*, activation_paused=False):
     path = os.environ.get('CHANNEL_WORKER_HEARTBEAT', '')
     if not path:
         return
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix('.' + str(os.getpid()) + '.tmp')
-    temporary.write_text(json.dumps({'pid': os.getpid(), 'time': time.time()}), encoding='utf-8')
+    temporary.write_text(json.dumps({
+        'pid': os.getpid(), 'time': time.time(),
+        'activation_paused': activation_paused,
+    }), encoding='utf-8')
     temporary.replace(target)
 
 
@@ -34,11 +37,12 @@ class Command(BaseCommand):
             running = False
         signal.signal(signal.SIGTERM, stop)
         signal.signal(signal.SIGINT, stop)
+        activation_paused = os.environ.get('NEWSHUB_ACTIVATION_PAUSED') == '1'
         while running:
             close_old_connections()
             try:
-                heartbeat()
-                if settings.PUBLIC_SITE_MODE == 'full':
+                heartbeat(activation_paused=activation_paused)
+                if not activation_paused and settings.PUBLIC_SITE_MODE == 'full':
                     refresh_profiles()
                     process_incremental_subscriptions()
                     if settings.PUBLIC_AI_ENABLED:
@@ -46,7 +50,7 @@ class Command(BaseCommand):
                         job = claim_next()
                         if job:
                             execute_job(job)
-                heartbeat()
+                heartbeat(activation_paused=activation_paused)
             except Exception as exc:
                 self.stderr.write('channel_worker: ' + type(exc).__name__)
                 if options['once']:

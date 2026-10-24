@@ -20,6 +20,7 @@ def test_local_full_overlay_enables_every_operator_health_dependency():
         'AI_BYOK_GATEWAY_URL': 'http://127.0.0.1:4000',
         'AI_BYOK_GATEWAY_PROJECT_KEY_FILE': '/run/secrets/ai_byok_gateway_project_key',
         'CHANNEL_WORKER_HEARTBEAT': '/app/logs/channel-worker-heartbeat.json',
+        'RSS_RUNTIME_DIR': '/app/rss-runtime',
         'RSS_ENGINE_INSTANCE_UUID': '${RSS_ENGINE_INSTANCE_UUID:?set by local-full-runtime.sh}',
         'RSS_ENGINE_ACCOUNT_ID': '${RSS_ENGINE_ACCOUNT_ID:?set by local-full-runtime.sh}',
         'TRANSLATION_REDIS_URL': '${TRANSLATION_REDIS_URL:?set by local-full-runtime.sh}',
@@ -32,6 +33,9 @@ def test_local_full_overlay_keeps_internal_services_private_and_pinned():
     services = yaml.safe_load((ROOT / 'compose.local-full.yaml').read_text())['services']
 
     assert services['channel-worker']['network_mode'] == 'service:app'
+    assert services['channel-worker']['environment']['NEWSHUB_ACTIVATION_PAUSED'] == '${NEWSHUB_ACTIVATION_PAUSED:-1}'
+    assert services['rss-sync']['environment']['NEWSHUB_ACTIVATION_PAUSED'] == '${NEWSHUB_ACTIVATION_PAUSED:-1}'
+    assert services['miniflux']['environment']['DISABLE_SCHEDULER_SERVICE'] == '${MINIFLUX_DISABLE_SCHEDULER:-1}'
     assert services['ai-gateway']['network_mode'] == 'service:app'
     assert 'ports' not in services['ai-gateway']
     assert 'ports' not in services['translation-redis']
@@ -51,8 +55,11 @@ def test_local_full_overlay_mounts_only_required_secrets_and_persistent_state():
     assert services['translation-redis']['secrets'] == ['translation_redis_password']
     assert services['rss-sync']['secrets'] == ['rss_engine_token']
     assert services['ai-gateway']['secrets'] == [
-        'ai_gateway_postgres_password', 'litellm_master_key', 'litellm_salt_key',
+        {'source': 'ai_gateway_postgres_password', 'target': 'postgres_password'},
+        'litellm_master_key', 'litellm_salt_key', 'ai_byok_gateway_project_key',
     ]
+    assert any(volume.endswith('/scripts/deploy/ai_gateway_bootstrap.py:/app/local-bootstrap.py:ro')
+               for volume in services['ai-gateway']['volumes'])
     assert set(overlay['volumes']) == {
         'rss-pg-data', 'rss-runtime-data', 'ai-gateway-postgres-data',
     }

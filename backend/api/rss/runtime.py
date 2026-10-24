@@ -25,6 +25,7 @@ def probe():
 def run(*, once=False, healthcheck=False, control=False, sync=False):
     status = probe()
     control = sync or control or os.environ.get('RSS_CONTROL_WORKER_ENABLED') == '1'
+    activation_paused = os.environ.get('NEWSHUB_ACTIVATION_PAUSED') == '1'
     if once and not control:
         return json.dumps(status, sort_keys=True)
     root = Path(os.environ.get('RSS_RUNTIME_DIR', '/var/lib/newshub/rss-runtime'))
@@ -33,9 +34,10 @@ def run(*, once=False, healthcheck=False, control=False, sync=False):
         try:
             state = json.loads(heartbeat.read_text())
             age = time.time() - state['timestamp']
-            if (state['role'] != 'rss_sync' or state['mode'] not in {'orm_shell', 'control_worker', 'sync_worker'}
-                    or (control and state['mode'] not in {'control_worker', 'sync_worker'})
-                    or (sync and state['mode'] != 'sync_worker')
+            allowed_modes = {'activation_paused'} if activation_paused else {'orm_shell', 'control_worker', 'sync_worker'}
+            if (state['role'] != 'rss_sync' or state['mode'] not in allowed_modes
+                    or (not activation_paused and control and state['mode'] not in {'control_worker', 'sync_worker'})
+                    or (not activation_paused and sync and state['mode'] != 'sync_worker')
                     or state.get('control_stalled') or state.get('sync_read_stalled') or not 0 <= age <= 60):
                 raise ValueError
         except (OSError, ValueError, KeyError, TypeError):
@@ -43,6 +45,10 @@ def run(*, once=False, healthcheck=False, control=False, sync=False):
         return json.dumps({**status, 'mode': state['mode'],
             'control_worker_integrated': state['mode'] in {'control_worker', 'sync_worker'},
             'worker_integrated': state['mode'] == 'sync_worker', 'sync_ready': state.get('engine_ready', False)}, sort_keys=True)
+
+    if activation_paused and once:
+        return json.dumps({**status, 'mode': 'activation_paused',
+                           'activation_paused': True}, sort_keys=True)
 
     root.mkdir(parents=True, exist_ok=True)
     lock_path = Path(settings.DATABASES['default']['NAME']).parent / '.rss-sync.lock'
@@ -57,6 +63,15 @@ def run(*, once=False, healthcheck=False, control=False, sync=False):
         worker = None
         synchronizer = None
         try:
+            if activation_paused:
+                status.update(mode='activation_paused', activation_paused=True)
+                while not stopped.is_set():
+                    temporary = root / 'heartbeat.tmp'
+                    temporary.write_text(json.dumps({**status, 'timestamp': time.time()}))
+                    temporary.replace(heartbeat)
+                    close_old_connections()
+                    stopped.wait(1)
+                return json.dumps({**status, 'stopped': True}, sort_keys=True)
             if control:
                 from api.rss.control_worker import ControlWorker
                 from api.rss.engine import EngineConfig, EngineError

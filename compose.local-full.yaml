@@ -8,6 +8,7 @@ services:
       AI_BYOK_GATEWAY_URL: http://127.0.0.1:4000
       AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
       CHANNEL_WORKER_HEARTBEAT: /app/logs/channel-worker-heartbeat.json
+      RSS_RUNTIME_DIR: /app/rss-runtime
       RSS_ENGINE_INSTANCE_UUID: "${RSS_ENGINE_INSTANCE_UUID:?set by local-full-runtime.sh}"
       RSS_ENGINE_ACCOUNT_ID: "${RSS_ENGINE_ACCOUNT_ID:?set by local-full-runtime.sh}"
       TRANSLATION_REDIS_URL: "${TRANSLATION_REDIS_URL:?set by local-full-runtime.sh}"
@@ -42,6 +43,7 @@ services:
       AI_BYOK_GATEWAY_URL: http://127.0.0.1:4000
       AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
       CHANNEL_WORKER_HEARTBEAT: /app/logs/channel-worker-heartbeat.json
+      NEWSHUB_ACTIVATION_PAUSED: "${NEWSHUB_ACTIVATION_PAUSED:-1}"
     network_mode: service:app
     volumes:
       - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend:/app/backend"
@@ -113,6 +115,7 @@ services:
       CLEANUP_ARCHIVE_READ_DAYS: "90"
       CLEANUP_ARCHIVE_UNREAD_DAYS: "90"
       FETCHER_ALLOW_PRIVATE_NETWORKS: "0"
+      DISABLE_SCHEDULER_SERVICE: "${MINIFLUX_DISABLE_SCHEDULER:-1}"
       LOG_LEVEL: error
     secrets: [rss_database_url, rss_engine_admin_password]
     ports: ["127.0.0.1:${RSS_ENGINE_PORT:-18080}:8080"]
@@ -143,6 +146,7 @@ services:
       RSS_ENGINE_TOKEN_FILE: /run/secrets/rss_engine_token
       RSS_RUNTIME_DIR: /app/rss-runtime
       RSS_FULL_CONTENT_ENABLED: "1"
+      NEWSHUB_ACTIVATION_PAUSED: "${NEWSHUB_ACTIVATION_PAUSED:-1}"
     secrets: [rss_engine_token]
     volumes:
       - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend:/app/backend"
@@ -209,7 +213,13 @@ services:
       - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/configure_trusted_endpoints.py:/app/configure_trusted_endpoints.py:ro"
       - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/ops/shared-litellm-proxy/trusted-endpoints:/app/trusted-endpoints:ro"
       - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/backend/api/services/ai_endpoint_profiles.py:/app/ai_endpoint_profiles.py:ro"
-    secrets: [ai_gateway_postgres_password, litellm_master_key, litellm_salt_key]
+      - "${NEWSHUB_SOURCE_ROOT:?set an absolute source root}/scripts/deploy/ai_gateway_bootstrap.py:/app/local-bootstrap.py:ro"
+    secrets:
+      - source: ai_gateway_postgres_password
+        target: postgres_password
+      - litellm_master_key
+      - litellm_salt_key
+      - ai_byok_gateway_project_key
     network_mode: service:app
     depends_on:
       app:

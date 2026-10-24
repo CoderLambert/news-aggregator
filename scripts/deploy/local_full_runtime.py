@@ -2,7 +2,7 @@
 """Activate the complete local NewsHub manual-acceptance runtime.
 
 Preview is the default. Execution targets one explicit local Compose project,
-keeps existing data and secrets, and never calls a model or subscription feed.
+keeps existing data and secrets, and pauses business I/O until preflight passes.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -40,11 +41,6 @@ IMAGE_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._/:@-]*$')
 IMAGE_DIGEST_RE = re.compile(r'^.+@sha256:[0-9a-f]{64}$')
 IMAGE_SHA_TAG_RE = re.compile(r'^.+(?:[-_.])[0-9a-f]{40}$')
 PENDING = 'pending-local-bootstrap'
-MODEL_ALLOWLIST = (
-    'openai/*', 'anthropic/*', 'deepseek/*', 'gemini/*', 'dashscope/*',
-    'zai/*', 'moonshot/*', 'mistral/*', 'groq/*', 'xai/*', 'openrouter/*',
-    'newshub/*',
-)
 
 
 class LocalRuntimeError(RuntimeError):
@@ -53,31 +49,42 @@ class LocalRuntimeError(RuntimeError):
 
 @dataclass(frozen=True)
 class ActivationCommands:
+    quiesce: list[str] | None
     infrastructure: list[str]
+    preflight: list[str]
     full: list[str]
     verify: list[str]
     stop_new: list[str]
     rollback: list[str]
 
 
-def _compose(project: str, files: tuple[Path, ...]) -> list[str]:
+def _compose(project: str, files: tuple[Path, ...], env_file: Path | None = None) -> list[str]:
     command = ['docker', 'compose', '-p', project]
     for path in files:
         command += ['-f', str(path)]
+    if env_file is not None:
+        command += ['--env-file', str(env_file)]
     return command
 
 
 def activation_commands(*, project: str, compose_files: tuple[Path, ...],
-                        previous_compose: tuple[Path, ...], wait_timeout: int) -> ActivationCommands:
-    current = _compose(project, compose_files)
-    old = _compose(project, previous_compose)
+                        previous_compose: tuple[Path, ...], current_env_file: Path,
+                        previous_env_file: Path | None,
+                        previous_services: tuple[str, ...], wait_timeout: int) -> ActivationCommands:
+    current = _compose(project, compose_files, current_env_file)
+    old = _compose(project, previous_compose, previous_env_file)
     up = ['up', '-d', '--no-build', '--pull', 'never', '--wait', '--wait-timeout', str(wait_timeout)]
+    replace = [*up, '--force-recreate']
+    quiesce_targets = [name for name in ('miniflux', 'rss-sync', 'channel-worker')
+                       if name in previous_services]
     return ActivationCommands(
+        quiesce=old + ['stop', *quiesce_targets] if quiesce_targets else None,
         infrastructure=current + up + list(INFRASTRUCTURE_SERVICES),
-        full=current + up + list(REQUIRED_SERVICES),
+        preflight=current + replace + list(REQUIRED_SERVICES),
+        full=current + replace + list(REQUIRED_SERVICES),
         verify=current + ['exec', '-T', 'app', 'python', '/app/backend/manage.py', 'runtime_health'],
         stop_new=current + ['stop', '--timeout', '45', *reversed(REQUIRED_SERVICES[2:])],
-        rollback=old + up + ['app', 'indexer'],
+        rollback=old + up + list(previous_services),
     )
 
 
@@ -266,30 +273,20 @@ def _bootstrap_miniflux(store: SecretStore, port: int) -> int:
     return account
 
 
-def _bootstrap_ai_gateway(store: SecretStore) -> None:
-    project_key = store.read('ai-project-key')
-    if project_key != PENDING:
-        models = _request_json('http://127.0.0.1:4000/v1/models',
-                               headers={'Authorization': 'Bearer ' + project_key})
-        if not isinstance(models, dict) or not isinstance(models.get('data'), list):
-            raise LocalRuntimeError('existing AI gateway project key is invalid')
-        return
-    result = _request_json('http://127.0.0.1:4000/key/generate', method='POST',
-        headers={'Authorization': 'Bearer ' + store.read('litellm-master-key')}, payload={
-            'models': list(MODEL_ALLOWLIST),
-            'key_alias': 'newshub-local-main',
-            'allowed_routes': ['llm_api_routes', '/newshub/models/discover'],
-            'max_budget': 5.0,
-            'budget_duration': '1d',
-            'rpm_limit': 60,
-            'tpm_limit': 120000,
-            'max_parallel_requests': 4,
-            'duration': '90d',
-        })
-    key = result.get('key') if isinstance(result, dict) else None
-    if not isinstance(key, str) or not re.fullmatch(r'sk-[A-Za-z0-9_-]{16,256}', key):
-        raise LocalRuntimeError('AI gateway did not return a valid project key')
-    store.replace_pending('ai-project-key', key)
+def _bootstrap_ai_gateway(store: SecretStore, compose: list[str], environment) -> None:
+    result = _run(compose + ['exec', '-T', 'ai-gateway', 'python', '/app/local-bootstrap.py'],
+                  environment=environment, timeout=60)
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        raise LocalRuntimeError('AI gateway bootstrap returned invalid JSON') from None
+    if not isinstance(payload, dict) or payload.get('status') not in {'created', 'reused'}:
+        raise LocalRuntimeError('AI gateway bootstrap returned an invalid status')
+    if payload['status'] == 'created':
+        key = payload.get('key')
+        if not isinstance(key, str) or not re.fullmatch(r'sk-[A-Za-z0-9_-]{16,256}', key):
+            raise LocalRuntimeError('AI gateway did not return a valid project key')
+        store.replace_pending('ai-project-key', key)
 
 
 def _write_runtime_env(path: Path, *, values: dict[str, str]) -> None:
@@ -335,6 +332,18 @@ def _previous_runtime(project: str):
     return files, image, source
 
 
+def _running_services(project: str) -> tuple[str, ...]:
+    result = _run([
+        'docker', 'ps', '--filter', f'label=com.docker.compose.project={project}',
+        '--format', '{{.Label "com.docker.compose.service"}}',
+    ])
+    names = tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
+    if ('app' not in names or len(set(names)) != len(names)
+            or any(name not in REQUIRED_SERVICES for name in names)):
+        raise LocalRuntimeError('existing local running service set is invalid')
+    return tuple(name for name in REQUIRED_SERVICES if name in names)
+
+
 def _backup_sqlite(source_root: Path, backup_root: Path) -> Path | None:
     source = source_root / 'backend/db.sqlite3'
     if not source.is_file() or source.is_symlink():
@@ -371,7 +380,8 @@ def _seed_secrets(store: SecretStore) -> dict[str, Path]:
     return paths
 
 
-def _environment(*, source_root: Path, image: str, store: SecretStore, paths: dict[str, Path], account: int) -> dict[str, str]:
+def _environment(*, source_root: Path, image: str, store: SecretStore,
+                 paths: dict[str, Path], account: int, activation_paused: bool) -> dict[str, str]:
     password = urllib.parse.quote(store.read('translation-redis-password'), safe='')
     return {
         'NEWSHUB_IMAGE': image,
@@ -389,66 +399,204 @@ def _environment(*, source_root: Path, image: str, store: SecretStore, paths: di
         'LITELLM_MASTER_KEY_FILE': str(paths['master']),
         'LITELLM_SALT_KEY_FILE': str(paths['salt']),
         'AI_BYOK_GATEWAY_PROJECT_KEY_FILE': str(paths['project']),
+        'NEWSHUB_ACTIVATION_PAUSED': '1' if activation_paused else '0',
+        'MINIFLUX_DISABLE_SCHEDULER': '1' if activation_paused else '0',
     }
+
+
+def _private_directory(path: Path) -> None:
+    if path.is_symlink():
+        raise LocalRuntimeError('runtime state directory must be a real private directory')
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        info = path.stat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            raise LocalRuntimeError('runtime state directory must be owner-controlled')
+        path.chmod(0o700)
+    except OSError:
+        raise LocalRuntimeError('runtime state directory is unavailable') from None
+
+
+def _copy_release_file(source: Path, target: Path) -> Path:
+    if not source.is_file() or source.is_symlink():
+        raise LocalRuntimeError('release source must be a regular file')
+    try:
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with source.open('rb') as incoming, os.fdopen(descriptor, 'wb') as outgoing:
+            shutil.copyfileobj(incoming, outgoing)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+    except OSError:
+        raise LocalRuntimeError('could not preserve the candidate runtime definition') from None
+    return target
+
+
+def _previous_activation(runtime_root: Path, *, project: str, source_root: Path,
+                         image: str, detected_compose: tuple[Path, ...],
+                         detected_services: tuple[str, ...]):
+    path = runtime_root / 'last-activation.json'
+    if not path.exists() and not path.is_symlink():
+        return detected_compose, None, detected_services, detected_compose
+    try:
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or info.st_size > 1024 * 1024):
+            raise ValueError
+        value = json.loads(path.read_text(encoding='utf-8'))
+        if (value.get('schema_version') != 2 or value.get('project') != project
+                or value.get('source_root') != str(source_root)
+                or value.get('image') != image):
+            raise ValueError
+        compose_files = tuple(Path(item) for item in value['compose_files'])
+        base_files = tuple(Path(item) for item in value['base_compose_files'])
+        env_file = Path(value['env_file'])
+        services = tuple(value['services'])
+        env_info = env_file.stat()
+        if (not compose_files or not base_files or not services
+                or compose_files != detected_compose
+                or any(not item.is_absolute() or not item.is_file() or item.is_symlink()
+                       for item in (*compose_files, *base_files, env_file))
+                or env_info.st_uid != os.getuid() or env_info.st_mode & 0o077
+                or len(set(services)) != len(services)
+                or not {'app', 'indexer'}.issubset(services)
+                or any(item not in services for item in detected_services)
+                or any(item not in REQUIRED_SERVICES for item in services)):
+            raise ValueError
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        raise LocalRuntimeError('previous activation receipt is invalid; refusing unsafe replacement') from None
+    return compose_files, env_file, detected_services, base_files
+
+
+def _restore_previous_runtime(commands: ActivationCommands, *, current_environment,
+                              rollback_environment, wait_timeout: int) -> None:
+    stop_failed = False
+    try:
+        stopped = _run(commands.stop_new, environment=current_environment,
+                       timeout=180, check=False)
+        stop_failed = stopped.returncode != 0
+    except LocalRuntimeError:
+        stop_failed = True
+    rollback_failed = False
+    try:
+        rollback = _run(commands.rollback, environment=rollback_environment,
+                        timeout=wait_timeout + 180, check=False)
+        rollback_failed = rollback.returncode != 0
+    except LocalRuntimeError:
+        rollback_failed = True
+    if stop_failed or rollback_failed:
+        raise LocalRuntimeError(
+            'activation failed and previous runtime restoration is incomplete; inspect protected Docker logs'
+        )
+
+
+def _write_receipt(path: Path, value: dict[str, object]) -> None:
+    if path.is_symlink():
+        raise LocalRuntimeError('activation receipt must not be a symlink')
+    temporary = path.with_name('.' + path.name + '.new')
+    if temporary.exists() or temporary.is_symlink():
+        raise LocalRuntimeError('activation receipt staging path is occupied')
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+            stream.write(json.dumps(value, indent=2, sort_keys=True) + '\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except OSError:
+        raise LocalRuntimeError('could not write the activation receipt') from None
 
 
 def _execute(*, project: str, source_root: Path, runtime_root: Path, image: str,
              wait_timeout: int, complete_overlay: Path) -> dict[str, object]:
     _local_docker()
-    previous, current_image, current_source = _previous_runtime(project)
+    detected_compose, current_image, current_source = _previous_runtime(project)
+    detected_services = _running_services(project)
     if source_root != current_source:
         raise LocalRuntimeError('source root differs from the running local database owner')
     require_immutable_image(image)
     _run(['docker', 'image', 'inspect', image])
+    _private_directory(runtime_root)
+    releases = runtime_root / 'releases'
+    _private_directory(releases)
+    previous, previous_env_file, previous_services, base_compose = _previous_activation(
+        runtime_root, project=project, source_root=source_root, image=current_image,
+        detected_compose=detected_compose, detected_services=detected_services,
+    )
+    release_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex
+    release_overlay = _copy_release_file(
+        complete_overlay, releases / ('compose-local-full-' + release_id + '.yaml'))
     store = SecretStore(runtime_root / 'secrets')
     paths = _seed_secrets(store)
-    env_file = runtime_root / 'runtime.env'
-    values = _environment(source_root=source_root, image=image, store=store, paths=paths, account=2)
+    env_file = releases / ('runtime-' + release_id + '.env')
+    values = _environment(source_root=source_root, image=image, store=store, paths=paths,
+                          account=2, activation_paused=True)
     _write_runtime_env(env_file, values=values)
-    compose_files = (*previous, complete_overlay)
+    compose_files = (*base_compose, release_overlay)
     commands = activation_commands(project=project, compose_files=compose_files,
-                                  previous_compose=previous, wait_timeout=wait_timeout)
-    compose = _compose(project, compose_files)
+                                  previous_compose=previous, current_env_file=env_file,
+                                  previous_env_file=previous_env_file,
+                                  previous_services=previous_services,
+                                  wait_timeout=wait_timeout)
+    compose = _compose(project, compose_files, env_file)
     environment = {**os.environ, **values}
-    _run(compose + ['--env-file', str(env_file), 'config', '--quiet'], environment=environment)
-    images = _run(compose + ['--env-file', str(env_file), 'config', '--images'], environment=environment).stdout.splitlines()
+    _run(compose + ['config', '--quiet'], environment=environment)
+    images = _run(compose + ['config', '--images'], environment=environment).stdout.splitlines()
     for candidate in sorted(set(filter(None, images))):
         _run(['docker', 'image', 'inspect', candidate])
     backup = _backup_sqlite(source_root, runtime_root / 'backups')
+    previous_environment = os.environ.copy()
+    if previous_env_file is not None:
+        for name in values:
+            previous_environment.pop(name, None)
     changed = False
     try:
         # `compose up --wait` may have replaced some containers before it
         # reports a later health failure, so rollback authority begins before
         # the first mutating Docker command is dispatched.
         changed = True
+        if commands.quiesce is not None:
+            _run(commands.quiesce, environment=previous_environment, timeout=180)
         _run(commands.infrastructure, environment=environment, timeout=wait_timeout + 180)
         account = _bootstrap_miniflux(store, 18080)
-        _bootstrap_ai_gateway(store)
-        values = _environment(source_root=source_root, image=image, store=store, paths=paths, account=account)
+        _bootstrap_ai_gateway(store, compose, environment)
+        values = _environment(source_root=source_root, image=image, store=store, paths=paths,
+                              account=account, activation_paused=True)
+        _write_runtime_env(env_file, values=values)
+        environment = {**os.environ, **values}
+        _run(commands.preflight, environment=environment, timeout=wait_timeout + 180)
+        values = _environment(source_root=source_root, image=image, store=store, paths=paths,
+                              account=account, activation_paused=False)
         _write_runtime_env(env_file, values=values)
         environment = {**os.environ, **values}
         _run(commands.full, environment=environment, timeout=wait_timeout + 180)
         health_result = _run(commands.verify, environment=environment, timeout=60)
         snapshot = require_full_health(json.loads(health_result.stdout.splitlines()[-1]))
-    except Exception:
+    except Exception as activation_error:
         if changed:
-            _run(commands.stop_new, environment=environment, timeout=180, check=False)
-            _run(commands.rollback, environment=os.environ.copy(), timeout=wait_timeout + 180, check=False)
+            try:
+                _restore_previous_runtime(
+                    commands, current_environment=environment,
+                    rollback_environment=previous_environment, wait_timeout=wait_timeout)
+            except LocalRuntimeError as rollback_error:
+                raise rollback_error from activation_error
         raise
     receipt = {
-        'schema_version': 1,
+        'schema_version': 2,
         'project': project,
         'image': image,
         'previous_image': current_image,
         'source_root': str(source_root),
         'services': list(REQUIRED_SERVICES),
+        'compose_files': [str(path) for path in compose_files],
+        'base_compose_files': [str(path) for path in base_compose],
+        'env_file': str(env_file),
+        'business_io_released': True,
         'health': {name: snapshot['checks'][name]['status'] for name in REQUIRED_HEALTH_CHECKS},
         'backup': str(backup) if backup else '',
         'activated_at': datetime.now(timezone.utc).isoformat(),
     }
     receipt_path = runtime_root / 'last-activation.json'
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-    receipt_path.chmod(0o600)
+    _write_receipt(receipt_path, receipt)
     return receipt
 
 
