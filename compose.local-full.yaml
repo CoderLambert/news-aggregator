@@ -1,0 +1,325 @@
+# Required local manual-acceptance runtime. Combine with compose.yaml under
+# project newshub-local-main through scripts/deploy/local-full-runtime.sh.
+#
+# App network unit: ai-gateway, translation-redis, and channel-worker use
+# network_mode: service:app. Never recreate/restart app alone — use
+# scripts/deploy/newshub-local recreate-app|restart-app (or local-full-runtime /
+# local-frontend-preview), which always expand to the full unit.
+services:
+  app:
+    image: "${NEWSHUB_IMAGE:?set an exact local image}"
+    labels:
+      newshub.app_network_unit: primary
+    env_file:
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
+        required: false
+    environment:
+      AI_BYOK_ENABLED: "1"
+      AI_BYOK_GATEWAY_URL: http://127.0.0.1:4000
+      AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
+      CHANNEL_WORKER_HEARTBEAT: /app/logs/channel-worker-heartbeat.json
+      RSS_RUNTIME_DIR: /app/rss-runtime
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHROMA_DATA_DIR: /var/lib/newshub/chroma
+      TTS_CACHE_DIR: /var/lib/newshub/tts
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
+      FULL_CONTENT_WORKER_LOCK: /app/logs/full-content.lock
+      FULL_CONTENT_WORKER_HEARTBEAT: /app/logs/full-content-heartbeat.json
+      SEARCH_INDEX_WORKER_LOCK: /app/logs/embedding-worker.lock
+      RSS_ENGINE_INSTANCE_UUID: "${RSS_ENGINE_INSTANCE_UUID:?set by local-full-runtime.sh}"
+      RSS_ENGINE_ACCOUNT_ID: "${RSS_ENGINE_ACCOUNT_ID:?set by local-full-runtime.sh}"
+      TRANSLATION_REDIS_URL: "${TRANSLATION_REDIS_URL:?set by local-full-runtime.sh}"
+    volumes:
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/chroma_data:/var/lib/newshub/chroma"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend/media/tts_cache:/var/lib/newshub/tts"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
+      - rss-runtime-data:/app/rss-runtime:ro
+    secrets:
+      - ai_byok_gateway_project_key
+    networks:
+      - default
+      - ai-gateway-db-net
+
+  indexer:
+    image: "${NEWSHUB_IMAGE:?set an exact local image}"
+    env_file:
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
+        required: false
+    environment:
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHROMA_DATA_DIR: /var/lib/newshub/chroma
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
+      SEARCH_INDEX_WORKER_LOCK: /app/logs/embedding-worker.lock
+    volumes:
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/chroma_data:/var/lib/newshub/chroma"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
+
+  channel-worker:
+    image: "${NEWSHUB_IMAGE:?set an exact local image}"
+    command: ["python", "/app/backend/manage.py", "channel_worker"]
+    env_file:
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
+        required: false
+    environment:
+      RUN_MAIN: "true"
+      NEWS_CRAWL_ONLY: "1"
+      AI_BYOK_ENABLED: "1"
+      AI_BYOK_GATEWAY_URL: http://127.0.0.1:4000
+      AI_BYOK_GATEWAY_PROJECT_KEY_FILE: /run/secrets/ai_byok_gateway_project_key
+      CHANNEL_WORKER_HEARTBEAT: /app/logs/channel-worker-heartbeat.json
+      NEWSHUB_ACTIVATION_PAUSED: "${NEWSHUB_ACTIVATION_PAUSED:-1}"
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
+      FULL_CONTENT_WORKER_LOCK: /app/logs/full-content.lock
+      FULL_CONTENT_WORKER_HEARTBEAT: /app/logs/full-content-heartbeat.json
+    network_mode: service:app
+    labels:
+      newshub.app_network_unit: sidecar
+    volumes:
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
+    secrets:
+      - ai_byok_gateway_project_key
+    depends_on:
+      app:
+        condition: service_healthy
+      ai-gateway:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 90s
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "channel_worker_healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 30s
+
+  translation-redis:
+    image: redis:8.10.2@sha256:2c2dff791878316e3b083188be0d578423b24813cdda5de0e80ea4f7b3e6bfd6
+    network_mode: service:app
+    labels:
+      newshub.app_network_unit: sidecar
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - 'exec redis-server --bind 127.0.0.1 --protected-mode yes --requirepass "$$(cat /run/secrets/translation_redis_password)" --save "" --appendonly no --maxmemory 192mb --maxmemory-policy noeviction'
+    secrets:
+      - translation_redis_password
+    depends_on:
+      app:
+        condition: service_started
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/data, /tmp]
+    mem_limit: 256m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", 'REDISCLI_AUTH="$$(cat /run/secrets/translation_redis_password)" redis-cli -h 127.0.0.1 ping | grep -qx PONG']
+      interval: 10s
+      timeout: 2s
+      retries: 12
+
+  rss-db:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    environment:
+      POSTGRES_DB: miniflux
+      POSTGRES_USER: miniflux
+      POSTGRES_PASSWORD_FILE: /run/secrets/rss_pg_password
+    secrets: [rss_pg_password]
+    volumes: [rss-pg-data:/var/lib/postgresql/data]
+    networks: [rss-db-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U miniflux -d miniflux"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  miniflux:
+    image: miniflux/miniflux:2.3.3@sha256:49d7b60987616387c306a8023087b31f2c9b7b21288b523026cb04058e8b6dbb
+    environment:
+      DATABASE_URL_FILE: /run/secrets/rss_database_url
+      RUN_MIGRATIONS: "1"
+      CREATE_ADMIN: "1"
+      ADMIN_USERNAME: newshub-engine-admin
+      ADMIN_PASSWORD_FILE: /run/secrets/rss_engine_admin_password
+      CLEANUP_ARCHIVE_READ_DAYS: "90"
+      CLEANUP_ARCHIVE_UNREAD_DAYS: "90"
+      FETCHER_ALLOW_PRIVATE_NETWORKS: "0"
+      DISABLE_SCHEDULER_SERVICE: "${MINIFLUX_DISABLE_SCHEDULER:-1}"
+      LOG_LEVEL: error
+    secrets: [rss_database_url, rss_engine_admin_password]
+    ports: ["127.0.0.1:${RSS_ENGINE_PORT:-18080}:8080"]
+    networks: [rss-db-net, rss-engine]
+    depends_on:
+      rss-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/bin/miniflux", "-healthcheck", "auto"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  rss-sync:
+    image: "${NEWSHUB_IMAGE:?set an exact local image}"
+    command: ["python", "/app/backend/manage.py", "rss_sync_worker"]
+    env_file:
+      - path: "${NEWSHUB_BACKEND_ENV_FILE:?set the existing backend environment file}"
+        required: false
+      - path: "${NEWSHUB_ENV_FILE:?set the existing environment file}"
+        required: false
+    environment:
+      RUN_MAIN: "true"
+      NEWSHUB_RUNTIME_ROLE: rss_sync
+      RSS_ENGINE_INSTANCE_UUID: "${RSS_ENGINE_INSTANCE_UUID:?set by local-full-runtime.sh}"
+      RSS_ENGINE_ACCOUNT_ID: "${RSS_ENGINE_ACCOUNT_ID:?set by local-full-runtime.sh}"
+      RSS_ENGINE_BASE_URL: http://miniflux:8080
+      RSS_ENGINE_TOKEN_FILE: /run/secrets/rss_engine_token
+      RSS_RUNTIME_DIR: /app/rss-runtime
+      RSS_FULL_CONTENT_ENABLED: "1"
+      NEWSHUB_ACTIVATION_PAUSED: "${NEWSHUB_ACTIVATION_PAUSED:-1}"
+      DJANGO_DB_PATH: /var/lib/newshub/db/db.sqlite3
+      CHATGPT_DEPLOYMENT_INSTANCE_FILE: /var/lib/newshub/db/.runtime/chatgpt-deployment-id
+    secrets: [rss_engine_token]
+    volumes:
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend:/app/backend:ro"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/backend:/var/lib/newshub/db"
+      - "${NEWSHUB_DATA_ROOT:?set the existing data owner}/logs:/app/logs"
+      - rss-runtime-data:/app/rss-runtime
+    networks: [rss-engine]
+    depends_on:
+      miniflux:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "/app/backend/manage.py", "rss_sync_worker", "--healthcheck"]
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 30s
+
+  ai-gateway-db:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD_FILE: /run/secrets/ai_gateway_postgres_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    secrets: [ai_gateway_postgres_password]
+    volumes: [ai-gateway-postgres-data:/var/lib/postgresql/data]
+    networks: [ai-gateway-db-net]
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -h 127.0.0.1']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    security_opt: [no-new-privileges:true]
+
+  ai-gateway:
+    image: ghcr.io/berriai/litellm:v1.105.0@sha256:60947db020b57e204823d3fbc8bb295c85be890d7c9adcc77fb4f5fc2fe410b2
+    user: "1000:1000"
+    entrypoint: ["/bin/sh", "/app/entrypoint.sh"]
+    command: ["--config", "/app/proxy.yaml", "--host", "127.0.0.1", "--port", "4000"]
+    environment:
+      HOME: /tmp
+      XDG_CACHE_HOME: /tmp/cache
+      PYTHONPATH: /app
+      POSTGRES_HOST: ai-gateway-db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      BYOK_TERMINAL_STREAMING_MODELS: deepseek/deepseek-flash
+      AI_BYOK_ENDPOINT_MANIFEST: /app/trusted-endpoints/manifest.json
+      LITELLM_WORKER_STARTUP_HOOKS: trusted_discovery:register
+    volumes:
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/proxy.yaml:/app/proxy.yaml:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/entrypoint.sh:/app/entrypoint.sh:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/provider_key_guard.py:/app/byok_gateway_policy.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_transport.py:/app/trusted_transport.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_chat.py:/app/trusted_chat.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_routes.py:/app/trusted_routes.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted_discovery.py:/app/trusted_discovery.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/configure_trusted_endpoints.py:/app/configure_trusted_endpoints.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/ops/shared-litellm-proxy/trusted-endpoints:/app/trusted-endpoints:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/backend/api/services/ai_endpoint_profiles.py:/app/ai_endpoint_profiles.py:ro"
+      - "${NEWSHUB_RELEASE_ROOT:?set the frozen release bundle}/scripts/deploy/ai_gateway_bootstrap.py:/app/local-bootstrap.py:ro"
+    secrets:
+      - source: ai_gateway_postgres_password
+        target: postgres_password
+      - litellm_master_key
+      - litellm_salt_key
+      - ai_byok_gateway_project_key
+    network_mode: service:app
+    labels:
+      newshub.app_network_unit: sidecar
+    depends_on:
+      app:
+        condition: service_started
+      ai-gateway-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/readiness', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+    restart: unless-stopped
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,size=512m,mode=1777"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 3g
+    cpus: 2.0
+
+networks:
+  rss-db-net:
+    internal: true
+  rss-engine: {}
+  ai-gateway-db-net:
+    internal: true
+
+volumes:
+  rss-pg-data: {}
+  rss-runtime-data: {}
+  ai-gateway-postgres-data: {}
+
+secrets:
+  translation_redis_password:
+    file: "${TRANSLATION_REDIS_PASSWORD_FILE:?set by local-full-runtime.sh}"
+  rss_pg_password:
+    file: "${RSS_PG_PASSWORD_FILE:?set by local-full-runtime.sh}"
+  rss_database_url:
+    file: "${RSS_DATABASE_URL_FILE:?set by local-full-runtime.sh}"
+  rss_engine_admin_password:
+    file: "${RSS_ENGINE_ADMIN_PASSWORD_FILE:?set by local-full-runtime.sh}"
+  rss_engine_token:
+    file: "${RSS_ENGINE_TOKEN_FILE:?set by local-full-runtime.sh}"
+  ai_gateway_postgres_password:
+    file: "${AI_GATEWAY_POSTGRES_PASSWORD_FILE:?set by local-full-runtime.sh}"
+  litellm_master_key:
+    file: "${LITELLM_MASTER_KEY_FILE:?set by local-full-runtime.sh}"
+  litellm_salt_key:
+    file: "${LITELLM_SALT_KEY_FILE:?set by local-full-runtime.sh}"
+  ai_byok_gateway_project_key:
+    file: "${AI_BYOK_GATEWAY_PROJECT_KEY_FILE:?set by local-full-runtime.sh}"

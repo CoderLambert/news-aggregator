@@ -163,6 +163,31 @@ backend/venv/bin/python backend/manage.py runtime_health
 
 命令输出版本化 JSON；任一已启用服务不可用时退出码非零。未配置的可选服务显示为 `disabled`，不会误报故障。超级管理员也可在 `/admin/rss` 的“服务健康状态”卡片查看同一快照并手动刷新。该聚合检查不会调用模型、Provider 或订阅源，也不会替代 `/api/health/ready/` 的数据库启动探针，避免 Worker 启动顺序形成循环依赖。
 
+`newshub-local-main` 手工验收环境必须使用完整运行时入口，不能直接用基础
+Compose 只启动 `app` 和 `indexer`：
+
+```bash
+./scripts/deploy/local-full-runtime.sh \
+  --project newshub-local-main \
+  --image newshub:dev-<精确40位源码SHA>
+
+# 核对预览后显式执行；脚本复用当前数据库、源码挂载、端口和已有内部密钥。
+./scripts/deploy/local-full-runtime.sh --execute \
+  --project newshub-local-main \
+  --image newshub:dev-<精确40位源码SHA>
+```
+
+入口在仓库外的 `~/.local/share/newshub-local-main/` 持久保存内部服务密钥、
+版本化 Compose/环境文件、从精确候选镜像提取的只读后端代码、SQLite 更新前备份及
+非敏感激活回执。候选代码与数据所有者严格分离：容器从冻结候选运行代码，数据库、
+Chroma、日志和 `.env` 仍由原 `newshub-local-main` 数据目录持有，旧 checkout 的源码
+不会覆盖候选代码。入口先暂停频道任务、
+RSS Worker 和 Miniflux 调度完成全栈预热，随后强制重建密钥消费者并释放业务 I/O，
+最后以全部七项运行检查均为 `ready` 作为成功条件。任一项 `disabled` 或
+`unavailable` 都会失败，并使用上一份版本化环境和原服务集合恢复更新前运行态；
+恢复命令失败会单独报错，不会把失败伪装成已回滚。预热和健康门禁不会主动发送模型
+或订阅源请求；业务 I/O 释放后，已有的授权队列和订阅会按正常运行规则立即继续处理。
+
 手动前台启动（适合容器、IDE 或需要直接查看日志的场景）：
 
 ```bash

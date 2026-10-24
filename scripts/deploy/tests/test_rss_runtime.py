@@ -76,6 +76,46 @@ def test_runtime_health_requires_live_heartbeat(tmp_path):
     assert 'heartbeat is missing or stale' in result.stderr
 
 
+def test_activation_pause_does_not_construct_or_poll_rss_engine(tmp_path):
+    import importlib.util
+    from types import ModuleType, SimpleNamespace
+    django = ModuleType('django')
+    django_conf = ModuleType('django.conf')
+    django_conf.settings = SimpleNamespace()
+    django_core = ModuleType('django.core')
+    django_management = ModuleType('django.core.management')
+    django_base = ModuleType('django.core.management.base')
+    django_base.CommandError = type('CommandError', (Exception,), {})
+    django_db = ModuleType('django.db')
+    django_db.close_old_connections = lambda: None
+    original = {name: sys.modules.get(name) for name in (
+        'django', 'django.conf', 'django.core', 'django.core.management',
+        'django.core.management.base', 'django.db')}
+    try:
+        sys.modules.update({
+            'django': django, 'django.conf': django_conf, 'django.core': django_core,
+            'django.core.management': django_management,
+            'django.core.management.base': django_base, 'django.db': django_db,
+        })
+        spec = importlib.util.spec_from_file_location(
+            'isolated_rss_runtime', ROOT / 'backend/api/rss/runtime.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.probe = lambda: {'role': 'rss_sync', 'mode': 'orm_shell',
+                                'orm_available': True, 'sync_ready': False,
+                                'worker_integrated': False}
+        os.environ['NEWSHUB_ACTIVATION_PAUSED'] = '1'
+        status = json.loads(module.run(once=True, control=True, sync=True))
+    finally:
+        os.environ.pop('NEWSHUB_ACTIVATION_PAUSED', None)
+        for name, value in original.items():
+            if value is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = value
+    assert status['mode'] == 'activation_paused'
+
+
 def test_optional_overlay_has_private_pg_scoped_secrets_and_loopback_api():
     config = yaml.safe_load((ROOT / 'compose.rss.prod.yaml').read_text())
     services = config['services']

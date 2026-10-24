@@ -162,30 +162,17 @@ for compose_file in "${COMPOSE_FILES[@]}"; do COMPOSE+=(-f "$compose_file"); don
 BASE_COMPOSE=("${COMPOSE[@]}")
 COMPOSE+=(-f "$OVERRIDE")
 "${COMPOSE[@]}" config --quiet
-if ! SHARED_NETWORK_SERVICES="$("${COMPOSE[@]}" config --format json | python3 -c '
-import json
-import re
-import sys
-
-target = sys.argv[1]
-document = json.load(sys.stdin)
-services = document.get("services")
-if not isinstance(services, dict) or target not in services:
-    raise SystemExit("target service is missing from Compose config")
-safe = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-for name in sorted(services):
-    if not safe.fullmatch(name):
-        raise SystemExit("unsafe service name in Compose config")
-    config = services[name]
-    if isinstance(config, dict) and config.get("network_mode") == f"service:{target}":
-        print(name)
-' "$SERVICE")"; then
+if ! UNIT_SERVICES="$("${COMPOSE[@]}" config --format json \
+    | python3 "$SCRIPT_DIR/app_network_unit.py" list-unit --from-json --project "$PROJECT" --target "$SERVICE")"; then
     fail 'could not identify services that share the app network namespace.'
 fi
-RECREATE_SERVICES=("$SERVICE")
-while IFS= read -r sidecar; do
-    [[ -z "$sidecar" ]] || RECREATE_SERVICES+=("$sidecar")
-done <<< "$SHARED_NETWORK_SERVICES"
+RECREATE_SERVICES=()
+while IFS= read -r member; do
+    [[ -z "$member" ]] || RECREATE_SERVICES+=("$member")
+done <<< "$UNIT_SERVICES"
+((${#RECREATE_SERVICES[@]} > 0)) || fail 'app network unit is empty.'
+[[ "${RECREATE_SERVICES[0]}" == "$SERVICE" ]] \
+    || fail 'app network unit must start with the target service.'
 CONTAINER_ID="$("${BASE_COMPOSE[@]}" ps -q "$SERVICE")"
 [[ -n "$CONTAINER_ID" ]] || fail "service $SERVICE is not running in project $PROJECT."
 OLD_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$CONTAINER_ID")"

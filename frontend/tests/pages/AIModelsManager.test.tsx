@@ -140,6 +140,7 @@ describe('T02 per-connection models and explicit billing consent', () => {
   it.each([
     ['result_unknown', '网关或网络未返回可验证结果'],
     ['incomplete_or_invalid', '模型返回了不完整或无法验证的响应'],
+    ['gateway_unavailable', '本地 AI 网关未启动或配置不可用'],
   ])('shows an explicit warning for a completed %s probe without retrying', async (safeErrorCode, message) => {
     vi.mocked(api.probeAIModel).mockResolvedValue({
       attempt_id: 'synthetic-attempt', request_id: 'synthetic-request', model_id: model.model_id,
