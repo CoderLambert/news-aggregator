@@ -974,9 +974,19 @@ export function useResearch(
     const { messageCount } = sessionId
       ? querySessionMessages(queryClient, queryViewerId, lang, sessionId)
       : { messageCount: 0 }
+    // Sessions without a saved answer have no native_continuation; /chat/ then
+    // returns 400 consent_required or 409 authorization_changed. Start create.
+    const canChat = Boolean(sessionId) && messageCount > 0
     const taskId = `research-${Date.now()}-${++taskSequenceRef.current}`
-    const task = createResearchTask(taskId, normalizedQuery, localOnly, priorMessages, sessionId, messageCount)
-    return runStreamTask(task, sessionId ? 'chat' : 'create', undefined, authorization)
+    const task = createResearchTask(
+      taskId,
+      normalizedQuery,
+      localOnly,
+      canChat ? priorMessages : [],
+      canChat ? sessionId : null,
+      canChat ? messageCount : 0,
+    )
+    return runStreamTask(task, canChat ? 'chat' : 'create', undefined, authorization)
   }, [activeSessionId, activeTask, authorizedCreateOnly, lang, queryClient, queryViewerId, runStreamTask, viewerId])
 
   const handleNewSession = useCallback(() => {
@@ -1021,15 +1031,17 @@ export function useResearch(
       || task.recovery !== 'retry' || viewerId === null) return false
     // An unanswered create POST may already have invoked a paid provider.
     if (loadPendingCreate(viewerId)) return false
+    // Retry on an empty/failed session must create a new session, not /chat/.
+    const canChat = Boolean(task.sessionId) && task.startingMessageCount > 0
     const next = createResearchTask(
       `research-${Date.now()}-${++taskSequenceRef.current}`,
       task.query,
       task.localOnly,
-      task.baseMessages,
-      task.sessionId,
-      task.startingMessageCount,
+      canChat ? task.baseMessages : [],
+      canChat ? task.sessionId : null,
+      canChat ? task.startingMessageCount : 0,
     )
-    return runStreamTask(next, next.sessionId ? 'chat' : 'create', undefined, authorization)
+    return runStreamTask(next, canChat ? 'chat' : 'create', undefined, authorization)
   }, [activeTask, authorizedCreateOnly, runStreamTask, viewerId])
 
   const handleResume = useCallback(async () => {

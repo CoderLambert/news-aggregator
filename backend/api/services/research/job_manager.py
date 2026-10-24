@@ -673,11 +673,20 @@ def submit_research_run(
             if authorization_requested:
                 from .execution import capture_snapshot, followup_snapshot
                 try:
+                    # Follow-up requires a saved native_continuation from a completed
+                    # answer. Failed/empty sessions have none; chat with explicit
+                    # consent must capture a fresh snapshot instead of 409
+                    # research_authorization_changed (UI otherwise shows incomplete).
+                    can_followup = (
+                        session_id is not None
+                        and isinstance(getattr(session, 'native_continuation', None), dict)
+                        and bool(session.native_continuation)
+                    )
                     execution_snapshot = (
                         followup_snapshot(
                             session, user, execution_source, model_config_id,
                         )
-                        if session_id is not None else capture_snapshot(
+                        if can_followup else capture_snapshot(
                             user, execution_source, model_config_id,
                         )
                     )
