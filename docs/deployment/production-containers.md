@@ -49,4 +49,17 @@ scripts/deploy/deploy.sh \
 
 静态导出助手默认只打印 dry-run 计划，不连接 Docker。生产发布流程由 `deploy.sh` 在当前数据库快照、迁移、app 与 worker health checks 全部通过后调用它。不要单独执行导出并切换生产静态版本。每个 release 只包含自己的真实静态文件与 asset 硬链接，公共目录/文件权限固定为目录 `0755`、文件 `0644`；共享旧资源不会进入其他 release 的摘要。同名资源内容不一致时拒绝覆盖。`current` 和 `previous` 通过同目录临时 symlink 原子替换，旧 release 不删除。
 
+## 本地前端动态预览（非生产发布）
+
+纯前端改动可用 `scripts/deploy/local-frontend-preview.sh` 复用宿主现有 Node 22 与 `frontend/node_modules`，生成内容寻址的静态 release，并以只读 bind mount 覆盖本地 app 容器的 `/app/frontend/dist`。脚本默认仅打印计划；`--execute` 才会校验 Compose、构建前端并只重建指定的 app 服务。它核对重建前后镜像 ID 不变、挂载路径精确且只读，并为当前/上一份 override 保存原子 symlink；激活或核对失败时恢复之前的 app 配置。release 根目录必须位于源码树之外，因此可供同一机器上的多个分支复用而不会把产物写回工作树。
+
+```sh
+scripts/deploy/local-frontend-preview.sh --execute \
+  --project newshub-main-ad36959 \
+  --compose /absolute/path/to/compose.yaml \
+  --compose /absolute/path/to/local-image.override.yaml
+```
+
+该入口只适用于本地预览。后端源码、Python 依赖、迁移、Worker 或运行配置变更仍须构建与部署精确 SHA 镜像；生产部署继续遵守上文“不挂载宿主 `frontend/dist`”的约束。脚本不会安装依赖、拉取 Node、迁移数据库或重建 Worker。
+
 真实 Docker build 与隔离卷 smoke 属于阶段 B，须在阶段 A 提交并收到固定新 HEAD 后执行。阶段 B 使用独立 Compose project、专用命名卷和 `WAITRESS_PORT=19527`，不得占用宿主现有 9527 服务；生产镜像的 revision 必须对应该阶段固定 SHA。
