@@ -189,7 +189,20 @@ class SelfHostedCIContract(unittest.TestCase):
         # Keep the isolated bootstrap valid without relaxing production hosts.
         self.assertIn("DJANGO_ALLOWED_HOSTS=news.lambert.host ", t00_run)
         self.assertNotIn("DJANGO_ALLOWED_HOSTS=testserver", t00_run)
-        self.assertIn('T00_PROXY_PYTHON="$t00_env/proxy/bin/python"', t00_run)
+        self.assertIn('T00_PROXY_PYTHON="$T00_PROXY_PYTHON"', t00_run)
+        # Caching only reuses dependencies; the full probe and its isolated
+        # synthetic database, HOME, Redis, and protocol contracts still run.
+        cache_step = next(step for step in backend_steps
+                          if step["name"] == "Reuse pinned BYOK T00 environments")
+        self.assertEqual(cache_step["run"], "bash ops/ci/install-t00-deps.sh")
+        self.assertEqual(cache_step["id"], "t00_deps")
+        self.assertEqual(backend_steps.index(cache_step) + 1, backend_steps.index(t00_step))
+        self.assertEqual(t00_step["env"]["T00_SDK_PYTHON"],
+                         "${{ steps.t00_deps.outputs.sdk_python }}")
+        self.assertEqual(t00_step["env"]["T00_PROXY_PYTHON"],
+                         "${{ steps.t00_deps.outputs.proxy_python }}")
+        self.assertNotIn('python3 -m venv "$t00_env/sdk"', t00_run)
+        self.assertNotIn("install-t00-deps.sh", dev_front_runs + dev_back_runs)
         self.assertIn('CHROMA_DATA_DIR="$t00_env/chroma"', t00_run)
         self.assertIn('TTS_CACHE_DIR="$t00_env/tts"', t00_run)
         self.assertIn('trap \'rm -rf "$t00_env"\' EXIT', t00_run)

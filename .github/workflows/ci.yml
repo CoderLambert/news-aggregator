@@ -250,24 +250,26 @@ jobs:
             scripts/deploy/tests/test_nginx_templates.py
       - name: Verify private self-hosted CI contract
         run: backend/venv/bin/python -m unittest discover -s ops/ci/tests -p 'test_*.py'
+      - name: Reuse pinned BYOK T00 environments
+        id: t00_deps
+        timeout-minutes: 12
+        run: bash ops/ci/install-t00-deps.sh
       - name: Verify BYOK T00 isolated SDK and Proxy contracts
         timeout-minutes: 12
+        env:
+          T00_SDK_PYTHON: ${{ steps.t00_deps.outputs.sdk_python }}
+          T00_PROXY_PYTHON: ${{ steps.t00_deps.outputs.proxy_python }}
         run: |
           t00_env="$(mktemp -d "${TMPDIR:?}/newshub-t00.XXXXXX")"
           trap 'rm -rf "$t00_env"' EXIT
-          python3 -m venv "$t00_env/sdk"
-          python3 -m venv "$t00_env/proxy"
-          "$t00_env/sdk/bin/python" -m pip install --disable-pip-version-check --no-input -r tools/byok_t00_probe/requirements-sdk.lock
-          "$t00_env/proxy/bin/python" -m pip install --disable-pip-version-check --no-input -r tools/byok_t00_probe/requirements-proxy.lock
-          "$t00_env/proxy/bin/python" tools/byok_t00_probe/prepare_proxy.py
-          "$t00_env/sdk/bin/python" -m unittest discover -s tools/byok_t00_probe -p 'test_*.py'
-          "$t00_env/sdk/bin/python" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'
-          "$t00_env/sdk/bin/python" tools/byok_t00_probe/probe.py --proxy-python "$t00_env/proxy/bin/python" --report "$t00_env/report.json"
+          "$T00_SDK_PYTHON" -m unittest discover -s tools/byok_t00_probe -p 'test_*.py'
+          "$T00_SDK_PYTHON" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'
+          "$T00_SDK_PYTHON" tools/byok_t00_probe/probe.py --proxy-python "$T00_PROXY_PYTHON" --report "$t00_env/report.json"
           env -i PATH="$PATH" LANG=C.UTF-8 DO_NOT_TRACK=1 LITELLM_LOCAL_MODEL_COST_MAP=True \
             PYTHONPATH="$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/backend/api/services:$GITHUB_WORKSPACE/ops/shared-litellm-proxy" \
-            "$t00_env/proxy/bin/python" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_trusted_*.py'
-          "$t00_env/sdk/bin/python" tools/byok_t00_probe/trusted_proxy.py \
-            --proxy-python "$t00_env/proxy/bin/python" --report "$t00_env/trusted-report.json"
+            "$T00_PROXY_PYTHON" -m unittest discover -s ops/shared-litellm-proxy/tests -p 'test_trusted_*.py'
+          "$T00_SDK_PYTHON" tools/byok_t00_probe/trusted_proxy.py \
+            --proxy-python "$T00_PROXY_PYTHON" --report "$t00_env/trusted-report.json"
           # Run the Django/API end-to-end proof only in this full, non-Draft
           # backend gate. The child receives no ambient provider credentials or DB configuration.
           # Bootstrap obeys production host validation; APIClient test hosts are
@@ -282,7 +284,7 @@ jobs:
             DJANGO_DB_PATH="$t00_env/t04-django.sqlite3" AI_BYOK_ENABLED=1 \
             CHROMA_DATA_DIR="$t00_env/chroma" TTS_CACHE_DIR="$t00_env/tts" \
             PROVIDER_CREDENTIAL_ENCRYPTION_KEY=CI-only-synthetic-provider-key-material \
-            T00_PROXY_PYTHON="$t00_env/proxy/bin/python" PYTHONDONTWRITEBYTECODE=1 \
+            T00_PROXY_PYTHON="$T00_PROXY_PYTHON" PYTHONDONTWRITEBYTECODE=1 \
             bash ops/ci/with-translation-redis.sh \
             backend/venv/bin/python -m pytest -c backend/pytest.ini \
             -o 'python_files=t04_*.py' -q \
