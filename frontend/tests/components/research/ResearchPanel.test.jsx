@@ -59,7 +59,8 @@ function renderPanel(
   route = '/',
   withDetailLauncher = false,
   user = signedInUser,
-  capabilityValue = fullCapabilities(),
+  // Classic hosted/public research path. BYOK-only suites pass research_byok_create: true.
+  capabilityValue = fullCapabilities({ research_byok_create: false }),
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
   return render(
@@ -677,7 +678,9 @@ describe('ResearchPanel', () => {
     api.openResearchSessionStream.mockImplementationOnce(() => new Promise((resolve) => {
       resolveProbe = resolve
     }))
-    api.researchChatStream.mockImplementation(async function* chat() {
+    api.createResearchStream.mockImplementation(async function* create(_query, options) {
+      options.onSessionId?.('history-pending-created')
+      yield { type: 'session_created', session_id: 'history-pending-created' }
       yield { type: 'text_delta', text: '问题已接受' }
       yield { type: 'complete' }
     })
@@ -705,12 +708,12 @@ describe('ResearchPanel', () => {
     await waitFor(() => expect(sendButton).toBeEnabled())
     fireEvent.click(sendButton)
 
-    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledWith(
-      history.id,
+    // Empty history has no native_continuation; accepted send starts create.
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledWith(
       '探测期间保留草稿',
       expect.objectContaining({ signal: expect.any(AbortSignal), localOnly: false }),
     ))
     await waitFor(() => expect(input).toHaveValue(''))
-    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
   })
 })
