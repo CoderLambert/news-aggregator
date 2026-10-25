@@ -11,9 +11,11 @@ from api.services.request_budget import BudgetDeferred
 
 def test_search_http_delegates_to_shared_pinned_budgeted_transport():
     request = urllib.request.Request('https://s.jina.ai/synthetic', headers={'Accept': 'application/json'})
-    with patch('api.services.safe_http.safe_urlopen', return_value=object()) as opened:
-        tools._open_search_http(request, timeout=8)
+    response = object()
+    with patch('api.services.safe_http.safe_urlopen', return_value=response) as opened:
+        actual = tools._open_search_http(request, timeout=8)
     opened.assert_called_once_with(request, timeout=8)
+    assert actual is response
 
 
 @pytest.mark.parametrize('error', [HTTPError('https://s.jina.ai/synthetic', 429, 'controlled', {}, None),

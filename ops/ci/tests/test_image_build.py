@@ -141,7 +141,8 @@ class BuildMetricsTests(unittest.TestCase):
                 '    (root / "child.signal").write_text(str(signum))\n'
                 '    raise SystemExit(0)\n'
                 'signal.signal(signal.SIGTERM, stop)\n'
-                '(root / "child.pid").write_text(str(os.getpid()))\n'
+                '(root / "child.pid.tmp").write_text(str(os.getpid()))\n'
+                '(root / "child.pid.tmp").replace(root / "child.pid")\n'
                 'while True: time.sleep(0.02)\n'
                 '"""\n'
                 'def stop(signum, _frame):\n'
@@ -149,7 +150,8 @@ class BuildMetricsTests(unittest.TestCase):
                 '    child.wait(timeout=5)\n'
                 '    raise SystemExit(128 + signum)\n'
                 'signal.signal(signal.SIGTERM, stop)\n'
-                '(root / "docker.pid").write_text(str(os.getpid()))\n'
+                '(root / "docker.pid.tmp").write_text(str(os.getpid()))\n'
+                '(root / "docker.pid.tmp").replace(root / "docker.pid")\n'
                 'child = subprocess.Popen([sys.executable, "-c", child_code])\n'
                 'while True: time.sleep(0.02)\n'
             )
@@ -166,6 +168,7 @@ class BuildMetricsTests(unittest.TestCase):
             )
             try:
                 deadline = time.monotonic() + 5
+                # PID paths are atomically published only after complete writes.
                 while time.monotonic() < deadline and not (
                     (root / 'docker.pid').exists() and (root / 'child.pid').exists()
                 ) and process.poll() is None:

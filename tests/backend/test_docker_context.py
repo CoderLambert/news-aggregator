@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -69,7 +70,16 @@ def _production_compose_config(project, tmp_path, explicit_values):
     return json.loads(result.stdout)
 
 
+def _require_isolated_context_docker():
+    if os.environ.get('NEWSHUB_TEST_DOCKER_CONTEXT') != '1':
+        pytest.skip('real Docker context test requires explicit opt-in')
+    if (os.environ.get('DOCKER_HOST') != 'unix:///ci-docker/docker.sock'
+            or os.environ.get('DOCKER_CONTEXT')):
+        pytest.fail('real Docker context test requires the isolated CI Docker socket')
+
+
 def _docker_inspect(resource_type, resource_name):
+    _require_isolated_context_docker()
     return subprocess.run(
         ['docker', resource_type, 'inspect', resource_name],
         check=False,
@@ -79,6 +89,7 @@ def _docker_inspect(resource_type, resource_name):
 
 
 def _docker_checked(*arguments):
+    _require_isolated_context_docker()
     result = subprocess.run(
         ['docker', *arguments],
         check=False,
@@ -106,7 +117,49 @@ def test_dockerignore_excludes_data_and_common_credentials():
     } <= patterns
 
 
+@pytest.mark.parametrize('opt_in,host,context,expected', [
+    (None, None, None, pytest.skip.Exception),
+    ('0', 'unix:///ci-docker/docker.sock', None, pytest.skip.Exception),
+    ('1', None, None, pytest.fail.Exception),
+    ('1', 'unix:///var/run/docker.sock', None, pytest.fail.Exception),
+    ('1', 'unix:///ci-docker/docker.sock', 'unapproved-context', pytest.fail.Exception),
+])
+def test_real_context_rejects_unapproved_docker_before_any_command(monkeypatch, opt_in, host, context, expected):
+    for key, value in (('NEWSHUB_TEST_DOCKER_CONTEXT', opt_in), ('DOCKER_HOST', host),
+                       ('DOCKER_CONTEXT', context)):
+        if value is None:
+            monkeypatch.delenv(key, raising=False)
+        else:
+            monkeypatch.setenv(key, value)
+    calls = []
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **k: calls.append((a, k)))
+    with pytest.raises(expected):
+        _docker_checked('build', 'synthetic-context')
+    with pytest.raises(expected):
+        _docker_inspect('image', 'synthetic-image')
+    assert calls == []
+
+
+def test_real_context_accepts_explicit_private_daemon(monkeypatch):
+    monkeypatch.delenv('DOCKER_CONTEXT', raising=False)
+    monkeypatch.setenv('NEWSHUB_TEST_DOCKER_CONTEXT', '1')
+    monkeypatch.setenv('DOCKER_HOST', 'unix:///ci-docker/docker.sock')
+    calls = []
+    result = SimpleNamespace(returncode=0)
+    def run(*args, **kwargs):
+        calls.append(args[0])
+        return result
+    monkeypatch.setattr(subprocess, 'run', run)
+    assert _docker_checked('build', 'synthetic-context') is result
+    assert _docker_inspect('image', 'synthetic-image') is result
+    assert calls == [
+        ['docker', 'build', 'synthetic-context'],
+        ['docker', 'image', 'inspect', 'synthetic-image'],
+    ]
+
+
 def test_real_docker_context_excludes_nested_private_files_but_keeps_source(tmp_path):
+    _require_isolated_context_docker()
     project = Path(__file__).resolve().parents[2]
     context = tmp_path / 'context'
     context.mkdir()
@@ -186,7 +239,10 @@ def test_real_docker_context_excludes_nested_private_files_but_keeps_source(tmp_
 def test_dockerfile_keeps_development_default_and_has_explicit_production_target():
     project = Path(__file__).resolve().parents[2]
     dockerfile = (project / 'Dockerfile').read_text(encoding='utf-8')
-    assert 'FROM python:3.12-slim AS runtime-base' in dockerfile
+    assert re.search(
+        r'^FROM python:3\.12-slim@sha256:[0-9a-f]{64} AS runtime-base$',
+        dockerfile, re.MULTILINE,
+    )
     assert 'FROM runtime-base AS production' in dockerfile
     assert 'FROM runtime-base AS development' in dockerfile
     assert dockerfile.rfind('FROM runtime-base AS development') > dockerfile.index(
