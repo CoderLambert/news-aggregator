@@ -7,6 +7,7 @@ import { verificationError } from '@/services/rssAdminApi'
 import { refreshRssViews } from '@/features/rss/queryRefresh'
 import DirectoryChannelCard from '@/features/rss/DirectoryChannelCard'
 import type { DirectoryEntry } from '@/features/rss/DirectoryChannelCard'
+import CatalogTaxonomyFilter, { parseCatalogSections, type CatalogFilters, type CatalogSection } from '@/features/rss/CatalogTaxonomyFilter'
 import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot } from '@/types/channels'
 
 interface Candidate { url: string; title: string; candidate_token: string }
@@ -37,6 +38,7 @@ function DiscoverySession({ viewer, roots, groups, onClose, onDone }: DiscoverDi
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [directoryCategory, setDirectoryCategory] = useState('')
+  const [catalogFilters, setCatalogFilters] = useState<CatalogFilters>({ section: '', group: '', language: '', region: '' })
   const [composing, setComposing] = useState(false)
   const [mode, setMode] = useState<'directory' | 'website' | 'feed'>('directory')
   const [submittedInput, setSubmittedInput] = useState('')
@@ -56,14 +58,20 @@ function DiscoverySession({ viewer, roots, groups, onClose, onDone }: DiscoverDi
     return () => clearTimeout(timer)
   }, [input, composing, mode])
   const directoryCurrent = !composing && query === input.trim()
+  const directoryKey = ['private', 'rss-directory', viewer, query, directoryCategory, catalogFilters] as const
+  const catalogQuery = Object.entries(catalogFilters).filter(([, value]) => value)
+    .map(([key, value]) => `&${key}=${encodeURIComponent(value)}`).join('')
   const directory = useInfiniteQuery({
-    queryKey: ['private', 'rss-directory', viewer, query, directoryCategory],
+    queryKey: directoryKey,
     enabled: mode === 'directory' && directoryCurrent && query.length <= 200,
     retry: false, staleTime: 30_000, refetchOnWindowFocus: false,
     placeholderData: keepPreviousData,
     initialPageParam: '',
-    queryFn: ({ signal, pageParam }) => workspaceRequest<{ results: DirectoryEntry[]; next_cursor: string | null; categories?: { id: string; name: string }[] }>(
-      `/rss/directory/?q=${encodeURIComponent(query)}${directoryCategory ? `&category=${encodeURIComponent(directoryCategory)}` : ''}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`, { signal }),
+    queryFn: async ({ signal, pageParam }) => {
+      const page = await workspaceRequest<{ results: DirectoryEntry[]; next_cursor: string | null; categories?: { id: string; name: string }[]; sections?: CatalogSection[] }>(
+        `/rss/directory/?q=${encodeURIComponent(query)}${directoryCategory ? `&category=${encodeURIComponent(directoryCategory)}` : ''}${catalogQuery}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`, { signal })
+      return { ...page, sections: parseCatalogSections(page.sections) }
+    },
     getNextPageParam: page => page.next_cursor ?? undefined,
   })
   const resultsCurrent = directoryCurrent && !directory.isPlaceholderData
@@ -125,20 +133,25 @@ function DiscoverySession({ viewer, roots, groups, onClose, onDone }: DiscoverDi
         <label className="workspace-grow">搜索订阅源、网站或 RSS 地址
           <input type="text" value={input} disabled={busy} placeholder="输入即搜索渠道，也可粘贴 RSS 地址" onCompositionStart={() => {
             setComposing(true)
-            void client.cancelQueries({ queryKey: ['private', 'rss-directory', viewer, query, directoryCategory], exact: true })
+            void client.cancelQueries({ queryKey: directoryKey, exact: true })
           }} onCompositionEnd={() => setComposing(false)} onChange={event => {
-            if (event.target.value.trim() !== query) void client.cancelQueries({ queryKey: ['private', 'rss-directory', viewer, query, directoryCategory], exact: true })
+            if (event.target.value.trim() !== query) void client.cancelQueries({ queryKey: directoryKey, exact: true })
             setMode('directory'); setInput(event.target.value); setSubmittedInput(''); setSelection(null); resolve.reset(); subscribe.reset()
           }} />
         </label><button className="workspace-button" disabled={busy}>{input.trim() ? '查找订阅' : '查看频道'}</button>
       </form>
+      {mode === 'directory' && <CatalogTaxonomyFilter sections={directory.data?.pages[0]?.sections ?? []}
+        value={catalogFilters} disabled={busy} onChange={value => {
+          void client.cancelQueries({ queryKey: directoryKey, exact: true })
+          setCatalogFilters(value); setSelection(null); setCategoryId(''); subscribe.reset()
+        }} />}
       {mode === 'directory' && <fieldset className="rss-directory-categories" disabled={busy}>
         <legend>按领域发现频道</legend>
         <div role="group" aria-label="频道领域分类">
           {[{ id: '', name: '全部分类' }, ...directoryCategories].map(category => <button type="button" key={category.id}
             aria-pressed={directoryCategory === category.id} onClick={() => {
               if (directoryCategory === category.id) return
-              void client.cancelQueries({ queryKey: ['private', 'rss-directory', viewer, query, directoryCategory], exact: true })
+              void client.cancelQueries({ queryKey: directoryKey, exact: true })
               setDirectoryCategory(category.id); setSelection(null); setCategoryId(''); subscribe.reset()
             }}>{category.name}</button>)}
         </div>
