@@ -7,6 +7,7 @@ queue. No source, keys or exception details are stored in this channel.
 from functools import lru_cache
 import ipaddress
 import json
+import logging
 import re
 import threading
 import time
@@ -14,6 +15,8 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from redis import Redis
+
+logger = logging.getLogger(__name__)
 
 ACTIVE_TTL = 90
 TERMINAL_TTL = 300
@@ -221,7 +224,8 @@ class BufferedPublisher:
                     with self.condition:
                         if not self.pending:
                             break
-        except Exception:
+        except Exception as exc:
+            logger.warning('Translation publisher failed (error_type=%s).', type(exc).__name__)
             self.fail()
 
     def _control(self):
@@ -233,11 +237,17 @@ class BufferedPublisher:
                 # not outlive the two-second window even when a DB call stalls.
                 close_old_connections()
                 self.validate()
-                if time.monotonic() - started > 1 or self.stopped.is_set():
+                if time.monotonic() - started > 1:
                     raise ChannelUnavailable()
+                # Normal drain can request stop while validation is in flight.
+                # It is not an authorization/transport failure. Real validation
+                # errors and the deadline above must still fail closed.
+                if self.stopped.is_set():
+                    return
                 self.channel.mutate('check', self.token)
                 self.checked = started
-        except Exception:
+        except Exception as exc:
+            logger.warning('Translation control failed (error_type=%s).', type(exc).__name__)
             self.fail()
         finally:
             close_old_connections()

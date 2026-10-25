@@ -7,6 +7,7 @@ from dataclasses import asdict
 from datetime import timedelta
 from hashlib import sha256
 import json
+import logging
 import re
 import uuid
 
@@ -27,6 +28,8 @@ from api.services.ai_verified_stream import IncompleteStream, verified_text_delt
 from api.services.stored_readers import article_snapshot, require_current
 from api.services import chatgpt_subscription_jobs as durable
 from api.services import translation_channel as transport
+
+logger = logging.getLogger(__name__)
 
 MAX_INPUT_CHARS = 8000
 MAX_INPUT_BYTES = 32000
@@ -735,6 +738,7 @@ def run_translation(task_id, generation):
     claimed = False
     channel = publisher = None
     resources = []
+    db_stage = 'claim'
     def abort():
         for resource in tuple(resources):
             close = getattr(resource, 'close', None)
@@ -748,6 +752,7 @@ def run_translation(task_id, generation):
         if task is None:
             return
         claimed = True
+        db_stage = 'claimed_snapshot'
         credential = task.execution_snapshot['credential']
         selection = _selection(task.execution_snapshot['model'])
         chunks = _task_chunks(task.execution_snapshot)
@@ -760,12 +765,14 @@ def run_translation(task_id, generation):
             'user__is_active': True,
         }
         completed_chunks = []
+        db_stage = 'transport_init'
         channel = transport.Channel(task.user_id, task.pk, generation)
         publisher = transport.BufferedPublisher(
             channel, token, lambda: _live(task_id, generation, token, started=False), abort,
         )
         with durable._task_heartbeat(task_id, generation, token, authority_filter=authority), publisher:
             for chunk_index, chunk in enumerate(chunks):
+                db_stage = 'chunk_prepare'
                 gateway = stream = None
                 pieces = []
                 chunk_body, separator = (_split_trailing_separator(chunk) if long_translation else (chunk, ''))
@@ -799,16 +806,20 @@ def run_translation(task_id, generation):
                     publisher.check()
                     return stream
                 try:
+                    db_stage = 'credential_admission'
                     key = durable._retry_task_database_operation(
                         lambda: prepare_dispatch(credential, task_owner_id=task.user_id),
                         stage='byok_dispatch_admission',
                     )
+                    db_stage = 'provider_send'
                     stream = send(key)
+                    db_stage = 'provider_stream'
                     for delta in verified_text_deltas(
                             stream, check=publisher.check,
                             max_chars=MAX_OUTPUT_CHARS):
                         publisher.append(delta)
                         pieces.append(delta)
+                    db_stage = 'chunk_validation'
                     translated_body = ''.join(pieces)
                     if separator:
                         # Normalize model-added terminal whitespace, then restore
@@ -829,9 +840,11 @@ def run_translation(task_id, generation):
                             except Exception:
                                 pass
                         resources[:] = [active for active in resources if active is not resource]
+            db_stage = 'publisher_shutdown'
         text = ''.join(completed_chunks)
         if len(text) > (T06_MAX_OUTPUT_CHARS if long_translation else MAX_OUTPUT_CHARS):
             raise TranslationError('incomplete_response')
+        db_stage = 'result_commit'
         result = _finish(task_id, generation, token, text, credential, task.user_id)
         # The successful DB commit is the only source of a success event.
         try:
@@ -839,6 +852,11 @@ def run_translation(task_id, generation):
         except transport.ChannelUnavailable:
             pass  # An authorized GET recovers the committed result; never resend upstream.
     except Exception as exc:
+        code, name = durable._sqlite_error_details(exc)
+        logger.warning(
+            'Private translation failed (stage=%s, error_type=%s, sqlite_code=%s, sqlite_name=%s).',
+            db_stage, type(exc).__name__, code, name,
+        )
         # Only content validation failures permit retaining an already-observed
         # client draft. Authority/storage failures remain generic and clear it.
         failure_code = ('incomplete_response' if isinstance(exc, IncompleteStream) or

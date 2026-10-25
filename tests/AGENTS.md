@@ -10,5 +10,6 @@ Read [root rules](../AGENTS.md) plus the rules for the implementation under test
 - Backend full coverage spans `tests/`, `backend/api/tests/`, `scripts/deploy/tests/`; the mixed serial/xdist algorithm is in `ops/ci/benchmark-xdist.sh`. Keep its serial-sensitive list and audit skip policy; do not impose a fixed passing count here.
 - Frontend uses Vitest one-shot `test:run`, Testing Library and existing aliases. Prefer behavior assertions over snapshots of incidental markup.
 - Do not run all expensive checks after every edit. First use affected tests, then the appropriate integration/CI gate; do not label a targeted run full coverage.
+- Build/cache experiments follow the [build/release policy](../ops/ci/build-release-policy.md): distinguish first-build, warm, test-only and source-change scenarios. Preserve failed samples and exact inputs. Offline mock containers cannot substitute for a network-capable client in an authorized real build; do not clear shared caches to create a baseline.
 - Report raw exit status, test scope, failures/skips and exact SHA. Retries need a classified infrastructure cause, not repeated runs until a flaky result turns green.
 - Structural Agent validation and synthetic checker tests do not validate Codex loading, rule following, code quality or token consumption. Those need separate real-session evidence.

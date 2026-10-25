@@ -50,7 +50,11 @@ def discover_rule_paths(root: Path) -> set[str]:
     for current, directories, files in os.walk(root, topdown=True, followlinks=False):
         directories[:] = [
             name for name in directories
-            if name not in IGNORED_SCAN_DIRS and not (Path(current) / name).is_symlink()
+            if name not in IGNORED_SCAN_DIRS
+            # Root-local worktrees are independent repositories, not modules.
+            # Do not suppress an identically named directory in business code.
+            and not (Path(current) == root and name == '.worktrees')
+            and not (Path(current) / name).is_symlink()
         ]
         for name in ('AGENTS.md', 'AGENTS.override.md'):
             if name in files:

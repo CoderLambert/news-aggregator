@@ -698,7 +698,12 @@ class CollectionAndWorkflowTests(unittest.TestCase):
         self.assertIn("ops/ci/xdist_summary.py", hybrid)
         full_step = next(s for s in backend_job["steps"] if s["name"] == "Run backend and offline deployment tests")
         self.assertEqual(full_step["env"]["CI_XDIST_REPEATS"], "1")
-        self.assertIn("--target production", runs)
+        self.assertEqual(full_step["env"]["NEWSHUB_TEST_DOCKER_CONTEXT"], "1")
+        self.assertIn('python3 ops/ci/build-production.py --sha "$RELEASE_SHA" --image "$NEWSHUB_IMAGE"', runs)
+        build_command = (ROOT / 'ops/ci/build-production.py').read_text()
+        self.assertIn('"--target", "production"', build_command)
+        self.assertIn('"--build-arg", f"RELEASE_SHA={args.sha}"', build_command)
+        self.assertIn('"--tag", args.image', build_command)
         self.assertIn("local-domain-smoke.sh --execute", runs)
         self.assertIn(
             "nginx@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94",

@@ -103,6 +103,61 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertFalse(task.result)
         self.assertFalse(ChatGPTArticleTranslation.objects.exists())
 
+    def test_worker_failure_logs_stage_and_type_without_private_message(self):
+        task = self.queued()
+        sensitive = 'sk-synthetic-private-key and private source contents'
+        with self.assertLogs('api.services.ai_private_translation', level='WARNING') as captured, \
+                patch.object(service, '_claim', side_effect=RuntimeError(sensitive)), \
+                patch.object(service, 'build_gateway_client') as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
+        self.assertFalse(task.result)
+        build.assert_not_called()
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        output = '\n'.join(captured.output)
+        self.assertIn('stage=claim', output)
+        self.assertIn('RuntimeError', output)
+        self.assertNotIn(sensitive, output)
+        self.assertNotIn('sk-synthetic-private-key', output)
+        self.assertNotIn('Traceback', output)
+
+    def test_worker_failure_logs_sanitized_sqlite_cause_details(self):
+        self._assert_worker_sqlite_diagnostics(
+            sqlite3.SQLITE_BUSY, 'SQLITE_BUSY', str(sqlite3.SQLITE_BUSY), 'SQLITE_BUSY',
+        )
+
+    def test_worker_failure_filters_invalid_sqlite_cause_details(self):
+        self._assert_worker_sqlite_diagnostics(
+            'private-code', 'SQLITE_sk-synthetic-private-key and private source contents',
+            'None', 'None',
+        )
+
+    def _assert_worker_sqlite_diagnostics(self, code, name, expected_code, expected_name):
+        sensitive = 'sk-synthetic-private-key and private source contents'
+        task = self.queued()
+        cause = sqlite3.OperationalError(sensitive)
+        cause.sqlite_errorcode = code
+        cause.sqlite_errorname = name
+        failure = RuntimeError(sensitive)
+        failure.__cause__ = cause
+        with self.assertLogs('api.services.ai_private_translation', level='WARNING') as captured, \
+                patch.object(service, '_claim', side_effect=failure), \
+                patch.object(service, 'build_gateway_client') as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
+        self.assertFalse(task.result)
+        build.assert_not_called()
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        output = '\n'.join(captured.output)
+        self.assertIn('stage=claim', output)
+        self.assertIn('error_type=RuntimeError', output)
+        self.assertIn(f'sqlite_code={expected_code}, sqlite_name={expected_name}', output)
+        self.assertNotIn(sensitive, output)
+        self.assertNotIn('private-code', output)
+        self.assertNotIn('Traceback', output)
+
     def test_authority_change_before_incomplete_terminal_does_not_preserve_draft(self):
         for mutation in ('credential', 'source'):
             with self.subTest(mutation=mutation):

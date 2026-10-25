@@ -1,3 +1,6 @@
+# Local task worktrees and evidence (each worktree validates its own rules)
+/.worktrees/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -152,7 +152,7 @@ def test_truncate_search_news_preserves_replayable_article_envelope():
     assert required.issubset(truncated['articles'][0])
 
 
-def test_search_web_soft_unavailable_has_no_error_key():
+def test_search_web_soft_unavailable_has_no_error_key(monkeypatch):
     """When all web backends fail, search_web must soft-degrade without 'error'.
 
     BYOK agent_loop aborts the whole run on any tool result that contains
@@ -167,17 +167,15 @@ def test_search_web_soft_unavailable_has_no_error_key():
     def boom_open(*args, **kwargs):
         raise Boom('Private or local URLs are not allowed')
 
-    # Patch the HTTP opener used by all search_web backends.
-    research_tools._open_search_http = boom_open  # type: ignore[attr-defined]
+    # Restore both shared helpers after this test, including on assertion failure.
+    monkeypatch.setattr(research_tools, '_open_search_http', boom_open)
     # Also force duckduckgo helper to fail the same way if it bypasses opener.
-    original_ddg = getattr(research_tools, '_duckduckgo_search', None)
-    research_tools._duckduckgo_search = lambda *a, **k: (_ for _ in ()).throw(Boom('ddg'))  # type: ignore
+    monkeypatch.setattr(
+        research_tools, '_duckduckgo_search',
+        lambda *a, **k: (_ for _ in ()).throw(Boom('ddg')),
+    )
 
-    try:
-        result = research_tools._search_web('LLM agent progress', count=3)
-    finally:
-        # leave module patched only for this process; tests reload fresh
-        pass
+    result = research_tools._search_web('LLM agent progress', count=3)
 
     assert isinstance(result.get('results'), list)
     assert result['results'] == []

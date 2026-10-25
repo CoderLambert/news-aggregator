@@ -310,6 +310,8 @@ jobs:
         # runs three repeated rounds for safety experiments.
         env:
           CI_XDIST_REPEATS: '1'
+          # Keep the real context regression in full CI, on the private DinD only.
+          NEWSHUB_TEST_DOCKER_CONTEXT: '1'
         run: bash ops/ci/with-translation-redis.sh bash ops/ci/benchmark-xdist.sh
       - name: Check production Django settings with synthetic values
         env:
@@ -327,7 +329,9 @@ jobs:
         env:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
-        run: docker build --target production --build-arg "RELEASE_SHA=$RELEASE_SHA" --tag "$NEWSHUB_IMAGE" .
+        run: |
+          python3 ops/ci/build-production.py --sha "$RELEASE_SHA" --image "$NEWSHUB_IMAGE" \
+            --report "$RUNNER_TEMP/production-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
       - name: Build cached isolated G1 probe image
         # G1 HTTP, Chromium and SSE must run inside DinD's gateway network.
         # A persistent DinD Docker volume caches browser and Python image layers.
