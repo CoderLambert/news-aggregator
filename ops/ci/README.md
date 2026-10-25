@@ -57,7 +57,7 @@ bash ops/ci/manage.sh uninstall
 
 - doctor 仅检查本机 Docker 和 Compose 配置，不创建容器。
 - install 可重跑，分别检查两个 Runner 的持久身份；如果此前已安装过单 Runner，会保留原后端 Runner 并新增前端 Runner。
-- install、start 和 update 会先用 maintenance 容器预热前后端缓存，全部成功后才启动 Runner listener；预热失败不会让 Runner 上线领取任务。
+- install、start 和 update 会先用 maintenance 容器预热前后端及 BYOK T00 依赖缓存，全部成功后才启动 Runner listener；预热失败不会让 Runner 上线领取任务。T00 复用现有 cache-backend 容器和 runner-work 卷，不新增维护服务。
 - cache-status 只运行安装器的只读状态检查，输出 `CACHE_KIND`、`STATUS`、`KEY` 和 `ROOT`。`HIT` 表示环境完整且校验通过，`PARTIAL` 表示同 key 安装曾开始但尚未完成，`MISSING` 表示该 key 尚无缓存目录。
 - warm-cache 在确认两个 Runner 空闲后暂停 listener，以 `--cache-only` 填充持久卷，不在源码 checkout 创建 `backend/venv` 或 `frontend/node_modules` 链接。
 - cache-gc 默认只预览；只有显式添加 `--execute` 才会持锁删除过期的 64 位十六进制 keyed 目录。它保留 `.current-key`、最近两个成功条目、下载缓存、锁和未知目录，不使用任何全局 prune。
@@ -179,6 +179,7 @@ PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 24
 | npm 下载缓存 | npm integrity cache，随 frontend-work 卷保留 | 首次缺包时 npm ci --prefer-offline，已有 tarballs 不重复下载 |
 | 后端 Python venv | requirements.txt 内容、Python ABI、架构、PyTorch 2.14.1+cpu、Playwright 1.62.0 指纹一致且 pip check 通过 | 直接复用 venv，**不重复执行 pip install** |
 | pip 下载缓存 | 持久 PIP_CACHE_DIR | 首次/依赖变化时尽量重用 wheels 和包元数据 |
+| BYOK T00 SDK/Proxy + Prisma | 两份 pinned lock、prepare_proxy.py、Python/Node 版本及架构一致，pip/包元数据、生成客户端和 Prisma 文件校验通过 | 仅复用依赖；协议、权限、流式终止和 Django 合成集成验证每次仍执行 |
 | 浏览器 Chromium | 在自定义 Runner 镜像的构建阶段安装 | 后续 CI 直接使用，无需每次 playwright install |
 | Docker build 镜像层 | 独立 DinD 的 docker-data 卷 | 未修改的生产构建层复用；不需要每次完整下载/构建 |
 | Docker BuildKit 下载缓存 | RSS pip、frontend npm、runtime Torch pip 各有独立 `sharing=locked` cache id | 构建步骤失败或上层缓存失效后仍复用已下载 wheel/tarball |
@@ -196,6 +197,10 @@ bash ops/ci/manage.sh warm-cache
 bash ops/ci/manage.sh cache-gc             # 仅预览
 bash ops/ci/manage.sh cache-gc --execute   # 空闲检查、持锁、定向删除
 ~~~
+
+T00 使用同一维护合同：`--status` 只读，`--cache-only` 无须 GitHub Outputs；成功条目写 `.newshub-ready`，根目录写 `.current-key`。旧 `.ready` 只有经过依赖/生成客户端校验后才迁移，不为改标记而重复安装。Prisma manifest/schema 还校验内容摘要，损坏时重建对应 key。
+
+T00 根为后端工作卷的 `.cache/newshub-t00-venvs`。统一 GC 默认仅预览，执行后保留最近两个成功条目加当前条目（最多三个不同 key），不删除下载缓存；两次显式维护之间仍可能积累新 key，这不是按字节自动限额。按锁文件更新频率通过上述入口定期预览和维护，不额外创建后台清理任务。维护命令继续执行双方 Runner 空闲检查并暂停 listener；T00 协议步骤还在完整消费者生命周期内共享 `.install.lock`，安装/GC 必须取得排他锁，因此不能删除运行中的环境。
 
 **不要**在 Job 正在运行时删除缓存，不要使用 docker system prune、docker volume prune 或删除 newshub-ci 的状态卷。安装器会优先尊重显式 `PIP_CACHE_DIR` / `npm_config_cache`；未设置时下载缓存仍回退到对应持久 cache root 内，不应改为 checkout 临时目录。
 

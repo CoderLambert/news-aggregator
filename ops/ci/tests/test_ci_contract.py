@@ -18,6 +18,7 @@ ENTRYPOINT = ROOT / "ops/ci/runner-entrypoint.sh"
 MANAGE = ROOT / "ops/ci/manage.sh"
 FRONT_DEPS = ROOT / "ops/ci/install-frontend-deps.sh"
 BACK_DEPS = ROOT / "ops/ci/install-backend-deps.sh"
+T00_DEPS = ROOT / "ops/ci/install-t00-deps.sh"
 WATCH = ROOT / "ops/ci/watch.py"
 WATCH_SERVICE = ROOT / "ops/ci/watch-service.sh"
 CHECK_LOCK = ROOT / "ops/ci/check-backend-lock.py"
@@ -183,6 +184,10 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'", t00_run)
         self.assertIn("tools/byok_t00_probe/t04_django_localproxy.py", t00_run)
         self.assertIn("env -i", t00_run)
+        self.assertIn('exec 9<"$t00_entry/../.install.lock"', t00_run)
+        self.assertIn('flock -s 9', t00_run)
+        self.assertLess(t00_run.index('flock -s 9'), t00_run.index('"$T00_SDK_PYTHON"'))
+        self.assertIn('test "$(cat "$t00_entry/.newshub-ready")"', t00_run)
         self.assertIn("bash ops/ci/with-translation-redis.sh", t00_run)
         self.assertIn('DOCKER_HOST="${DOCKER_HOST:-}"', t00_run)
         self.assertIn("DJANGO_ENV=production", t00_run)
@@ -190,7 +195,20 @@ class SelfHostedCIContract(unittest.TestCase):
         # Keep the isolated bootstrap valid without relaxing production hosts.
         self.assertIn("DJANGO_ALLOWED_HOSTS=news.lambert.host ", t00_run)
         self.assertNotIn("DJANGO_ALLOWED_HOSTS=testserver", t00_run)
-        self.assertIn('T00_PROXY_PYTHON="$t00_env/proxy/bin/python"', t00_run)
+        self.assertIn('T00_PROXY_PYTHON="$T00_PROXY_PYTHON"', t00_run)
+        # Caching only reuses dependencies; the full probe and its isolated
+        # synthetic database, HOME, Redis, and protocol contracts still run.
+        cache_step = next(step for step in backend_steps
+                          if step["name"] == "Reuse pinned BYOK T00 environments")
+        self.assertEqual(cache_step["run"], "bash ops/ci/install-t00-deps.sh")
+        self.assertEqual(cache_step["id"], "t00_deps")
+        self.assertEqual(backend_steps.index(cache_step) + 1, backend_steps.index(t00_step))
+        self.assertEqual(t00_step["env"]["T00_SDK_PYTHON"],
+                         "${{ steps.t00_deps.outputs.sdk_python }}")
+        self.assertEqual(t00_step["env"]["T00_PROXY_PYTHON"],
+                         "${{ steps.t00_deps.outputs.proxy_python }}")
+        self.assertNotIn('python3 -m venv "$t00_env/sdk"', t00_run)
+        self.assertNotIn("install-t00-deps.sh", dev_front_runs + dev_back_runs)
         self.assertIn('CHROMA_DATA_DIR="$t00_env/chroma"', t00_run)
         self.assertIn('TTS_CACHE_DIR="$t00_env/tts"', t00_run)
         self.assertIn('trap \'rm -rf "$t00_env"\' EXIT', t00_run)
@@ -340,7 +358,7 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("runner-state:/runner/data", svc["runner"]["volumes"])
 
     def test_script_syntax(self):
-        for script in (MANAGE, ENTRYPOINT, FRONT_DEPS, BACK_DEPS, WATCH_SERVICE, CACHE_SUMMARY):
+        for script in (MANAGE, ENTRYPOINT, FRONT_DEPS, BACK_DEPS, T00_DEPS, WATCH_SERVICE, CACHE_SUMMARY):
             with self.subTest(file=script.name):
                 result = subprocess.run(
                     ["bash", "-n", str(script)],
@@ -428,10 +446,29 @@ class SelfHostedCIContract(unittest.TestCase):
         update = script.split("    update)", 1)[1].split("        ;;", 1)[0]
         self.assertLess(update.index("compose stop"), update.index("warm_cache"))
 
+    def test_t00_reuses_unified_cache_lifecycle_and_idle_guards(self):
+        script = MANAGE.read_text(encoding='utf-8')
+        warm = script.split('warm_cache() {', 1)[1].split('\n}', 1)[0]
+        status = script.split('cache_status() {', 1)[1].split('\n}', 1)[0]
+        gc = script.split('cache_gc() {', 1)[1].split('\n}', 1)[0]
+        self.assertIn('cache-backend', warm)
+        self.assertIn('/source/ops/ci/install-t00-deps.sh --cache-only', warm)
+        self.assertIn('/source/ops/ci/install-t00-deps.sh --status', status)
+        self.assertIn('--root /ci-work/_work/.cache/newshub-t00-venvs', gc)
+        for command in ('warm-cache', 'cache-gc'):
+            block = script.split(f'    {command})', 1)[1].split('        ;;', 1)[0]
+            self.assertLess(block.index('require_idle'), block.index('compose stop'))
+            self.assertLess(block.index('compose stop'), block.index(command.replace('-', '_')))
+        t00 = T00_DEPS.read_text(encoding='utf-8')
+        self.assertIn('.newshub-ready', t00)
+        self.assertIn('.current-key', t00)
+        self.assertIn('flock -x 9', t00)
+
     def test_cache_summary_uses_read_only_installer_status(self):
         summary = CACHE_SUMMARY.read_text(encoding="utf-8")
         self.assertIn('install-backend-deps.sh" --status', summary)
         self.assertIn('install-frontend-deps.sh" --status', summary)
+        self.assertIn('install-t00-deps.sh" --status', summary)
         self.assertNotIn("du -sh", summary)
         self.assertTrue(CACHE_MAINTENANCE.is_file())
 

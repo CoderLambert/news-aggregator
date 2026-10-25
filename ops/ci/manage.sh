@@ -28,8 +28,8 @@ Usage: bash ops/ci/manage.sh <install|start|stop|status|logs|update|doctor|watch
   enable-watch   Install the user-systemd health timer.
   disable-watch  Disable this user-systemd health timer.
   watch-logs     Show recent health timer logs.
-  cache-status   Read backend and frontend dependency-cache status.
-  warm-cache     Stop idle listeners, populate both caches, then restore them.
+  cache-status   Read backend, frontend and T00 dependency-cache status.
+  warm-cache     Stop idle listeners, populate dependency caches, then restore them.
   cache-gc       Dry-run targeted cache cleanup; add --execute to remove.
   uninstall Stop/delete only this Compose project's containers and networks.
             Does NOT remove volumes or unregister the GitHub-side runner.
@@ -147,11 +147,15 @@ report_status() {
 warm_cache() {
     compose run --rm --no-deps volume-init
     compose --profile maintenance run --rm --no-deps cache-backend
+    compose --profile maintenance run --rm --no-deps cache-backend \
+        /source/ops/ci/install-t00-deps.sh --cache-only
     compose --profile maintenance run --rm --no-deps cache-frontend
 }
 cache_status() {
     compose --profile maintenance run --rm --no-deps cache-backend \
         /source/ops/ci/install-backend-deps.sh --status
+    compose --profile maintenance run --rm --no-deps cache-backend \
+        /source/ops/ci/install-t00-deps.sh --status
     compose --profile maintenance run --rm --no-deps cache-frontend \
         /source/ops/ci/install-frontend-deps.sh --status
 }
@@ -165,6 +169,9 @@ cache_gc() {
     compose --profile maintenance run --rm --no-deps --entrypoint python3 cache-backend \
         /source/ops/ci/cache-maintenance.py gc \
         --root /ci-work/_work/.cache/newshub-venvs "${execute[@]}"
+    compose --profile maintenance run --rm --no-deps --entrypoint python3 cache-backend \
+        /source/ops/ci/cache-maintenance.py gc \
+        --root /ci-work/_work/.cache/newshub-t00-venvs "${execute[@]}"
     compose --profile maintenance run --rm --no-deps --entrypoint python3 cache-frontend \
         /source/ops/ci/cache-maintenance.py gc \
         --root /ci-frontend/_work/.cache/newshub-node-modules "${execute[@]}"

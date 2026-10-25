@@ -1,25 +1,26 @@
-# CI-P01 — isolated pytest-xdist feasibility gate
+# Pytest hybrid runner and manual performance benchmark
 
-Initial **full** `-n 2 --dist=loadfile` experiment ran 2424 tests in
-125.48 seconds, but failed 16 seed-dependent Django tests. That configuration
-is **not safe** to enable as the normal release gate.
+## Normal CI
 
-The current benchmark tests a fail-closed hybrid:
-- Seven state/seed-sensitive Django modules always run **serial**, retaining
-  their migration and database fixture behavior.
-- The remaining files execute on `-n 2 --dist=loadfile`, using normal
-  per-worker database isolation. Both parts run three times.
-- Each repetition checks the authoritative pytest terminal totals:
-  **2429 expected passes / 16 explicitly skipped** for the new title-hint feature branch (2417 previous baseline + 12 new BYOK terminal-regression cases). The historical 128/126/126-second experiments apply only to the prior 2410-pass baseline; this branch must run its own full CI before acceptance.
-  JUnit XML is independently inspected for failures/errors. We avoid counting
-  JUnit test-suite summary attributes that disagreed with pytest's actual
-  terminal outcomes during the first hybrid experiment.
-- Failures are never reclassified as skipped; normal CI still runs serially.
-- Tooling versions are frozen (`pytest-xdist==3.8.0`,
-  `execnet==2.1.1`) and installed into a separate private cache, not the
-  backend venv or production dependencies.
-- CI-P01 remains opt-in and keeps the required serial backend/G1 CI intact.
-  Default parallel adoption requires all three hybrid runs to pass, and an
-  independently green default CI run after switching.
+The canonical workflow `.github/workflows/ci.yml` runs one full hybrid round (`CI_XDIST_REPEATS=1`) for each selected full backend gate. Draft checks remain scoped and do not invoke the full runner.
 
-No live RSS opt-in, external ports, secrets or production data are used.
+`ops/ci/benchmark-xdist.sh` owns the execution policy:
+
+- State/seed-sensitive modules in its `SERIAL_FILES` array run serially. Keep this as the single source of truth instead of copying a file count into documentation.
+- The remaining files use two isolated xdist workers with `--dist=loadfile` and `--max-worker-restart=0`.
+- All three test roots are covered: `tests/`, `backend/api/tests/`, and `scripts/deploy/tests/`.
+- Collected and executed test identities, terminal outcomes, and JUnit reports are reconciled. Skip policy lives in `xdist_summary.py`; do not replace the identity audit with a fixed passing count.
+
+The existing isolated Redis wrapper prepares the translation transport for the whole round. Production image and G1 checks remain in the normal workflow and are not replaced by this benchmark.
+
+## Manual profiling
+
+`.github/workflows/ci-pytest-benchmark.yml` is **workflow_dispatch only**. It runs three full rounds with the same isolated Redis wrapper when an operator explicitly requests profiling. It does not automatically queue three more rounds when a PR changes CI scripts, and it is not a merge gate.
+
+The benchmark shares the dedicated backend runner with normal CI. Run it only when investigating performance or validating a deliberate parallelism change; do not use it for every development iteration.
+
+## Safety and history
+
+The original unrestricted parallel experiment failed seed-sensitive tests. That is why the hybrid serial list remains authoritative. Do not remove entries or increase workers without fixture-isolation evidence and repeated passing runs.
+
+Current tooling versions are pinned by the runner script. Historical pass counts and experiment timings are not acceptance criteria for new commits. Report the exact commit, selected scope, raw exit status, failures/skips, and observed timings. No live providers, production data, or production credentials are required.

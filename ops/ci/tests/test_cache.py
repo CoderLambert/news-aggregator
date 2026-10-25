@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -28,6 +29,12 @@ class DependencyCacheTests(unittest.TestCase):
         self.env.update({
             "PATH": f"{self.bin}:{os.environ['PATH']}",
             "XDG_CACHE_HOME": str(self.root / "cache"),
+            # Explicit runner cache settings take precedence over XDG_CACHE_HOME.
+            # Every inherited cache path must remain inside this fixture.
+            "npm_config_cache": str(self.root / "downloads/npm"),
+            "PIP_CACHE_DIR": str(self.root / "downloads/pip"),
+            "CI_FRONTEND_CACHE_ROOT": str(self.root / "cache/newshub-node-modules"),
+            "CI_BACKEND_CACHE_ROOT": str(self.root / "cache/newshub-venvs"),
             "CI_TEST_LOG": str(self.log),
             "CI_TEST_REAL_PYTHON": shutil.which("python3"),
             "HOME": str(self.root),
@@ -394,6 +401,32 @@ exit 71
         second = self.run_script(script, "--cache-only")
         self.assertIn("READY", second.stdout)
         self.assertEqual(self.log.read_text().splitlines().count("network-download"), 1)
+        # A further cache hit must not run npm ci or fetch the tarball again.
+        third = self.run_script(script, "--cache-only")
+        self.assertIn("HIT", third.stdout)
+        self.assertEqual(self.log.read_text().splitlines().count("network-download"), 1)
+
+    def test_retry_fixture_does_not_inherit_runner_download_caches(self):
+        ambient = self.root / 'ambient-npm'
+        ambient.mkdir()
+        sentinel = ambient / 'downloaded'
+        sentinel.write_text('shared-cache-must-not-be-used')
+        with mock.patch.dict(os.environ, {
+            'npm_config_cache': str(ambient),
+            'PIP_CACHE_DIR': str(self.root / 'ambient-pip'),
+            'CI_FRONTEND_CACHE_ROOT': str(self.root / 'ambient-modules'),
+            'CI_BACKEND_CACHE_ROOT': str(self.root / 'ambient-venvs'),
+        }):
+            nested = DependencyCacheTests('test_frontend_retry_reuses_the_same_download_cache')
+            result = unittest.TestResult()
+            nested.run(result)
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(result.errors, [])
+        self.assertEqual(result.failures, [])
+        self.assertEqual(sentinel.read_text(), 'shared-cache-must-not-be-used')
+        self.assertEqual(list(ambient.iterdir()), [sentinel])
+        for name in ('ambient-pip', 'ambient-modules', 'ambient-venvs'):
+            self.assertFalse((self.root / name).exists())
 
 
 if __name__ == "__main__":

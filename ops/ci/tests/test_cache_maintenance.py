@@ -1,5 +1,6 @@
 """Behavior tests for safe, targeted dependency-cache maintenance."""
 from pathlib import Path
+import fcntl
 import os
 import subprocess
 import tempfile
@@ -77,6 +78,26 @@ class CacheMaintenanceTests(unittest.TestCase):
         self.assertTrue(target.is_dir())
         self.assertTrue(symlink.is_symlink())
         self.assertTrue((self.root / ".install.lock").is_file())
+
+    def test_gc_waits_for_active_consumers_sharing_install_lock(self):
+        stale = self.keyed("a")
+        with (self.root / '.install.lock').open('w') as lease:
+            fcntl.flock(lease, fcntl.LOCK_SH)
+            process = subprocess.Popen(
+                ['python3', str(MAINTENANCE), 'gc', '--root', str(self.root),
+                 '--keep-successful', '0', '--execute'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            try:
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    process.wait(timeout=0.3)
+                self.assertTrue(stale.is_dir())
+            finally:
+                fcntl.flock(lease, fcntl.LOCK_UN)
+                stdout, stderr = process.communicate(timeout=10)
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertIn(f'REMOVED {stale}', stdout)
+        self.assertFalse(stale.exists())
 
     def test_invalid_current_key_fails_closed(self):
         stale = self.keyed("a", mtime=10)

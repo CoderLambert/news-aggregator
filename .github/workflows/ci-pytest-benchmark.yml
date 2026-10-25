@@ -1,29 +1,24 @@
 name: CI pytest parallel benchmark
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'ops/ci/benchmark-xdist.sh'
-      - '.github/workflows/ci-pytest-benchmark.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 # The same isolated backend runner serves the normal release workflow.
-# Benchmark queues rather than contends with other backend jobs.
+# Manual profiling only: normal Ready/main CI already runs one full round.
+# Do not queue three additional rounds for ordinary CI-script PRs.
 concurrency:
   group: newshub-xdist-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   pytest-xdist-lab:
-    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft)
     runs-on: [self-hosted, linux, x64, newshub-ci]
     timeout-minutes: 60
     env:
-      PYTHONPATH: backend:crawler
+      PYTHONPATH: backend
       RUN_MAIN: 'true'
       CI_XDIST_REPEATS: '3'
     steps:
@@ -40,4 +35,4 @@ jobs:
       - name: Reuse backend venv
         run: bash ops/ci/install-backend-deps.sh
       - name: Three full hybrid serial/xdist coverage runs
-        run: bash ops/ci/benchmark-xdist.sh
+        run: bash ops/ci/with-translation-redis.sh bash ops/ci/benchmark-xdist.sh
