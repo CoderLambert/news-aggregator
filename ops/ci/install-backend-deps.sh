@@ -11,27 +11,34 @@ CHECKER="$PROJECT_ROOT/ops/ci/check-backend-lock.py"
 TORCH_PIN="2.14.1+cpu"
 PLAYWRIGHT_PIN="1.62.0"
 CACHE_ROOT="${CI_BACKEND_CACHE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/newshub-venvs}"
-PIP_CACHE_DIR="$CACHE_ROOT/.pip"
-REFRESH="${1:-}"
+PIP_CACHE_DIR="${PIP_CACHE_DIR:-$CACHE_ROOT/.pip}"
+REFRESH=false
+STATUS_ONLY=false
+CACHE_ONLY=false
 
-case "$REFRESH" in
-    ""|--refresh) ;;
-    *) echo "Usage: bash ops/ci/install-backend-deps.sh [--refresh]" >&2; exit 2 ;;
-esac
+for argument in "$@"; do
+    case "$argument" in
+        --refresh) REFRESH=true ;;
+        --status) STATUS_ONLY=true ;;
+        --cache-only) CACHE_ONLY=true ;;
+        *)
+            echo "Usage: bash ops/ci/install-backend-deps.sh [--refresh] [--cache-only] | --status" >&2
+            exit 2
+            ;;
+    esac
+done
+if $STATUS_ONLY && { $REFRESH || $CACHE_ONLY; }; then
+    echo "--status cannot be combined with install options" >&2
+    exit 2
+fi
 [[ "$CACHE_ROOT" == /* && "$CACHE_ROOT" != / ]] || { echo "cache root must be absolute" >&2; exit 2; }
 [[ ! -L "$CACHE_ROOT" ]] || { echo "cache root must not be a symlink" >&2; exit 2; }
+[[ "$PIP_CACHE_DIR" == /* && "$PIP_CACHE_DIR" != / ]] || { echo "pip cache must be absolute" >&2; exit 2; }
+[[ ! -L "$PIP_CACHE_DIR" ]] || { echo "pip cache must not be a symlink" >&2; exit 2; }
 [[ -f "$REQ" && -f "$LOCK" && -f "$CHECKER" ]] || {
     echo "backend requirements, CI lock or lock checker missing" >&2; exit 2;
 }
 python3 "$CHECKER" "$REQ" "$LOCK"
-mkdir -p "$CACHE_ROOT"
-chmod 700 "$CACHE_ROOT"
-[[ ! -L "$PIP_CACHE_DIR" ]] || { echo "pip cache must not be a symlink" >&2; exit 2; }
-mkdir -p "$PIP_CACHE_DIR"
-chmod 700 "$PIP_CACHE_DIR"
-export PIP_CACHE_DIR
-exec 9>"$CACHE_ROOT/.install.lock"
-flock -x 9
 
 # Direct requirements + complete CI lock, Python ABI, architecture and torch pin form the cache key.
 # Bump CI_BACKEND_CACHE_REV to invalidate old environments deliberately.
@@ -49,8 +56,39 @@ cache_healthy() {
     "$ENV_DIR/bin/python" "$CHECKER" "$REQ" "$LOCK" --installed >/dev/null 2>&1
 }
 
-if [[ "$REFRESH" == --refresh ]] || ! cache_healthy; then
-    if [[ "$REFRESH" != --refresh && -d "$ENV_DIR" && ! -L "$ENV_DIR" && -x "$ENV_DIR/bin/python" ]]; then
+if cache_healthy; then
+    STATUS=HIT
+elif [[ -d "$ENV_DIR" && ! -L "$ENV_DIR" ]]; then
+    STATUS=PARTIAL
+else
+    STATUS=MISSING
+fi
+printf 'CACHE_KIND=backend\nSTATUS=%s\nKEY=%s\nROOT=%s\n' "$STATUS" "$KEY" "$CACHE_ROOT"
+
+if $STATUS_ONLY; then
+    exit 0
+fi
+
+mkdir -p "$CACHE_ROOT"
+chmod 700 "$CACHE_ROOT"
+mkdir -p "$PIP_CACHE_DIR"
+chmod 700 "$PIP_CACHE_DIR"
+export PIP_CACHE_DIR
+exec 9>"$CACHE_ROOT/.install.lock"
+flock -x 9
+
+# Recheck after taking the lock because another maintenance process may have
+# completed the same content-addressed environment while this process waited.
+if cache_healthy; then
+    STATUS=HIT
+elif [[ -d "$ENV_DIR" && ! -L "$ENV_DIR" ]]; then
+    STATUS=PARTIAL
+else
+    STATUS=MISSING
+fi
+
+if $REFRESH || [[ "$STATUS" != HIT ]]; then
+    if ! $REFRESH && [[ "$STATUS" == PARTIAL && -x "$ENV_DIR/bin/python" ]]; then
         # An interrupted pip run leaves a usable partial venv. Resume in place:
         # pip skips satisfied packages and the persistent download cache supplies
         # completed wheels, avoiding another large torch/package download.
@@ -73,6 +111,16 @@ if [[ "$REFRESH" == --refresh ]] || ! cache_healthy; then
     mv -f -- "$STAMP.tmp" "$STAMP"
 else
     printf 'NewsHub backend dependency cache: HIT (%s), skipping torch/pip installs\n' "${KEY:0:16}"
+fi
+
+CURRENT_TMP="$CACHE_ROOT/.current-key.tmp.$$"
+printf '%s\n' "$KEY" > "$CURRENT_TMP"
+mv -f -- "$CURRENT_TMP" "$CACHE_ROOT/.current-key"
+
+if $CACHE_ONLY; then
+    "$ENV_DIR/bin/python" -m pip check
+    printf 'NewsHub backend dependency cache: READY (%s, cache-only)\n' "${KEY:0:16}"
+    exit 0
 fi
 
 # Existing pipeline references backend/venv/bin/python. Store the real

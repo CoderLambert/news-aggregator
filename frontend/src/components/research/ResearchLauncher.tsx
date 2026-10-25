@@ -11,7 +11,9 @@ export default function ResearchLauncher() {
   const { enabled: researchEnabled } = useCapability('research')
   const { enabled: authorizedCreateEnabled } = useCapability('research_byok_create')
   const enabled = researchEnabled || authorizedCreateEnabled
-  const authorizedCreateOnly = !researchEnabled && authorizedCreateEnabled
+  // When BYOK create is available, always require explicit source+consent even if
+  // the historical public `research` capability is also enabled (local PUBLIC_AI).
+  const authorizedCreateOnly = authorizedCreateEnabled
   const [open, setOpen] = useState(false)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [LazyResearchPanel, setLazyResearchPanel] = useState(() => InitialLazyResearchPanel)

@@ -260,6 +260,12 @@ jobs:
           T00_SDK_PYTHON: ${{ steps.t00_deps.outputs.sdk_python }}
           T00_PROXY_PYTHON: ${{ steps.t00_deps.outputs.proxy_python }}
         run: |
+          # Share the install/GC lock for the complete consumer lifetime.
+          # Maintenance cannot remove an environment still running probes.
+          t00_entry="${T00_PROXY_PYTHON%/proxy/bin/python}"
+          exec 9<"$t00_entry/../.install.lock"
+          flock -s 9
+          test "$(cat "$t00_entry/.newshub-ready")" = "${t00_entry##*/}"
           t00_env="$(mktemp -d "${TMPDIR:?}/newshub-t00.XXXXXX")"
           trap 'rm -rf "$t00_env"' EXIT
           "$T00_SDK_PYTHON" -m unittest discover -s tools/byok_t00_probe -p 'test_*.py'

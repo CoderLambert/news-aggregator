@@ -194,7 +194,37 @@ def run_agent_loop(
         authorized_calls = None
         if execution_snapshot is not None and raw_tool_calls:
             # Validate the whole provider batch before the first event or tool side effect.
-            authorized_calls = validate_tool_batch(raw_tool_calls, available_tools)
+            from .execution import ResearchExecutionError
+            try:
+                authorized_calls = validate_tool_batch(raw_tool_calls, available_tools)
+            except ResearchExecutionError as exc:
+                if exc.code != 'invalid_tool_call':
+                    raise
+                # After local evidence exists, a bad tool batch must not wipe the run
+                # (UI: incomplete answer / chat 400 recovery). Ask for a text report.
+                has_evidence = bool(
+                    session is not None
+                    and session.search_results.exists()
+                )
+                if not has_evidence:
+                    raise
+                logger.info(
+                    'Ignoring invalid tool batch after evidence gathered (session=%s).',
+                    getattr(session, 'pk', None),
+                )
+                content = getattr(assistant_message, 'content', None) or ''
+                if not isinstance(content, str):
+                    content = ''
+                messages.append({'role': 'assistant', 'content': content})
+                messages.append({
+                    'role': 'user',
+                    'content': (
+                        '上一次工具调用未能通过安全校验，已跳过且未执行。'
+                        '请基于已收集的证据直接输出完整研究报告，不要再调用工具。'
+                    ),
+                })
+                available_tools = None
+                continue
         authorized_args_by_id = {
             call['id']: call for call in (authorized_calls or [])
         }
@@ -391,6 +421,8 @@ def _tool_result_summary(name: str, result: dict) -> str:
         return f'{label}: {title}'
     if name == 'search_web':
         count = len(result.get('results', []))
+        if count == 0 and result.get('source') == 'unavailable':
+            return '联网搜索暂时不可用，已跳过'
         return f'联网搜索到 {count} 条结果'
     if name == 'fetch_webpage':
         length = result.get('length', 0)

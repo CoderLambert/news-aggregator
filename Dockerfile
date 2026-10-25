@@ -9,7 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOME=/home/newshub
 WORKDIR /app
 COPY backend/requirements-rss.lock /app/backend/requirements-rss.lock
-RUN pip install --no-cache-dir --only-binary=:all: -r /app/backend/requirements-rss.lock \
+RUN --mount=type=cache,id=newshub-rss-pip-v1,target=/root/.cache/pip,sharing=locked \
+    pip install --only-binary=:all: -r /app/backend/requirements-rss.lock \
     && groupadd --gid 10001 newshub \
     && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin newshub \
     && mkdir -p /var/lib/newshub/db /var/lib/newshub/rss-runtime \
@@ -21,7 +22,8 @@ CMD ["python", "/app/backend/manage.py", "rss_sync_worker"]
 FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,id=newshub-frontend-npm-v1,target=/root/.npm,sharing=locked \
+    npm ci
 COPY frontend/ ./
 RUN npm run build
 
@@ -36,7 +38,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 ARG TORCH_VERSION=2.14.1+cpu
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,id=newshub-runtime-torch-pip-v1,target=/root/.cache/pip,sharing=locked \
+    pip install \
         --index-url https://download.pytorch.org/whl/cpu \
         "torch==${TORCH_VERSION}"
 # Keep the large CPU wheel cached across ordinary requirements/source changes.

@@ -42,6 +42,16 @@ def test_research_byok_create_capability_is_narrow_and_independent_of_public_ai(
         assert features['translation']['enabled'] is False
 
     with override_settings(
+        PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True, AI_BYOK_ENABLED=True,
+        DJANGO_ENV='development',
+    ):
+        # Local PUBLIC_AI stacks still need the BYOK create flag so the UI requires
+        # consent+model instead of empty-snapshot provider_unavailable failures.
+        features = _feature_snapshot()
+        assert features['research']['enabled'] is True
+        assert features['research_byok_create']['enabled'] is True
+
+    with override_settings(
         PUBLIC_SITE_MODE='read_only', PUBLIC_AI_ENABLED=False, AI_BYOK_ENABLED=True,
         DJANGO_ENV='production',
     ):

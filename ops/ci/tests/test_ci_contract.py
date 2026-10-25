@@ -18,10 +18,12 @@ ENTRYPOINT = ROOT / "ops/ci/runner-entrypoint.sh"
 MANAGE = ROOT / "ops/ci/manage.sh"
 FRONT_DEPS = ROOT / "ops/ci/install-frontend-deps.sh"
 BACK_DEPS = ROOT / "ops/ci/install-backend-deps.sh"
+T00_DEPS = ROOT / "ops/ci/install-t00-deps.sh"
 WATCH = ROOT / "ops/ci/watch.py"
 WATCH_SERVICE = ROOT / "ops/ci/watch-service.sh"
 CHECK_LOCK = ROOT / "ops/ci/check-backend-lock.py"
 CACHE_SUMMARY = ROOT / "ops/ci/cache-summary.sh"
+CACHE_MAINTENANCE = ROOT / "ops/ci/cache-maintenance.py"
 CI_LOCK = ROOT / "backend/requirements-ci.lock"
 
 
@@ -182,6 +184,10 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("unittest discover -s ops/shared-litellm-proxy/tests -p 'test_provider_key_guard.py'", t00_run)
         self.assertIn("tools/byok_t00_probe/t04_django_localproxy.py", t00_run)
         self.assertIn("env -i", t00_run)
+        self.assertIn('exec 9<"$t00_entry/../.install.lock"', t00_run)
+        self.assertIn('flock -s 9', t00_run)
+        self.assertLess(t00_run.index('flock -s 9'), t00_run.index('"$T00_SDK_PYTHON"'))
+        self.assertIn('test "$(cat "$t00_entry/.newshub-ready")"', t00_run)
         self.assertIn("bash ops/ci/with-translation-redis.sh", t00_run)
         self.assertIn('DOCKER_HOST="${DOCKER_HOST:-}"', t00_run)
         self.assertIn("DJANGO_ENV=production", t00_run)
@@ -352,7 +358,7 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("runner-state:/runner/data", svc["runner"]["volumes"])
 
     def test_script_syntax(self):
-        for script in (MANAGE, ENTRYPOINT, FRONT_DEPS, BACK_DEPS, WATCH_SERVICE, CACHE_SUMMARY):
+        for script in (MANAGE, ENTRYPOINT, FRONT_DEPS, BACK_DEPS, T00_DEPS, WATCH_SERVICE, CACHE_SUMMARY):
             with self.subTest(file=script.name):
                 result = subprocess.run(
                     ["bash", "-n", str(script)],
@@ -406,6 +412,65 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("npm_config_cache", cfg["services"]["runner-frontend"]["environment"])
         self.assertIn("PIP_CACHE_DIR", cfg["services"]["runner"]["environment"])
         self.assertIn("docker-data:/var/lib/docker", cfg["services"]["docker"]["volumes"])
+
+    def test_maintenance_services_isolate_cache_volumes(self):
+        services = load(COMPOSE)["services"]
+        backend = services["cache-backend"]
+        frontend = services["cache-frontend"]
+        self.assertEqual(backend["profiles"], ["maintenance"])
+        self.assertEqual(frontend["profiles"], ["maintenance"])
+        self.assertEqual(backend["user"], "1001:121")
+        self.assertEqual(frontend["user"], "1001:121")
+        self.assertIn("--cache-only", backend["command"])
+        self.assertIn("--cache-only", frontend["command"])
+        backend_volumes = str(backend["volumes"])
+        frontend_volumes = str(frontend["volumes"])
+        self.assertIn("runner-work", backend_volumes)
+        self.assertNotIn("frontend-work", backend_volumes)
+        self.assertIn("frontend-work", frontend_volumes)
+        self.assertNotIn("runner-work", frontend_volumes)
+        for service in (backend, frontend):
+            source_mount = next(v for v in service["volumes"] if isinstance(v, dict))
+            self.assertEqual(source_mount["target"], "/source")
+            self.assertTrue(source_mount["read_only"])
+            self.assertNotIn("privileged", service)
+
+    def test_manage_warms_cache_before_listener_start(self):
+        script = MANAGE.read_text(encoding="utf-8")
+        self.assertIn("cache-status|warm-cache|cache-gc", script)
+        self.assertIn("cache-maintenance.py", script)
+        for command in ("install", "start", "update"):
+            block = script.split(f"    {command})", 1)[1].split("        ;;", 1)[0]
+            self.assertIn("warm_cache", block)
+            self.assertLess(block.index("warm_cache"), block.index("compose up"))
+        update = script.split("    update)", 1)[1].split("        ;;", 1)[0]
+        self.assertLess(update.index("compose stop"), update.index("warm_cache"))
+
+    def test_t00_reuses_unified_cache_lifecycle_and_idle_guards(self):
+        script = MANAGE.read_text(encoding='utf-8')
+        warm = script.split('warm_cache() {', 1)[1].split('\n}', 1)[0]
+        status = script.split('cache_status() {', 1)[1].split('\n}', 1)[0]
+        gc = script.split('cache_gc() {', 1)[1].split('\n}', 1)[0]
+        self.assertIn('cache-backend', warm)
+        self.assertIn('/source/ops/ci/install-t00-deps.sh --cache-only', warm)
+        self.assertIn('/source/ops/ci/install-t00-deps.sh --status', status)
+        self.assertIn('--root /ci-work/_work/.cache/newshub-t00-venvs', gc)
+        for command in ('warm-cache', 'cache-gc'):
+            block = script.split(f'    {command})', 1)[1].split('        ;;', 1)[0]
+            self.assertLess(block.index('require_idle'), block.index('compose stop'))
+            self.assertLess(block.index('compose stop'), block.index(command.replace('-', '_')))
+        t00 = T00_DEPS.read_text(encoding='utf-8')
+        self.assertIn('.newshub-ready', t00)
+        self.assertIn('.current-key', t00)
+        self.assertIn('flock -x 9', t00)
+
+    def test_cache_summary_uses_read_only_installer_status(self):
+        summary = CACHE_SUMMARY.read_text(encoding="utf-8")
+        self.assertIn('install-backend-deps.sh" --status', summary)
+        self.assertIn('install-frontend-deps.sh" --status', summary)
+        self.assertIn('install-t00-deps.sh" --status', summary)
+        self.assertNotIn("du -sh", summary)
+        self.assertTrue(CACHE_MAINTENANCE.is_file())
 
     def test_boot_watchdog_is_safe_and_opt_in_for_linger(self):
         ci = CI.read_text(encoding="utf-8")

@@ -500,7 +500,22 @@ def _run_worker(run_id, query, local_only):
                 _notify(run_id)
                 return
             if event_type == 'error':
-                raise ResearchRunError('research_provider_unavailable', '研究服务暂时不可用，请稍后重试。', 503)
+                message = ''
+                if isinstance(data, dict):
+                    raw = data.get('message')
+                    if isinstance(raw, str):
+                        message = raw.strip()
+                if not message:
+                    message = '研究服务暂时不可用，请稍后重试。'
+                # personal_clients_for_user / missing BYOK must not look like gateway downtime
+                personal = any(token in message for token in (
+                    '个人模型', 'API Key', '授权上下文', '重新配置',
+                ))
+                raise ResearchRunError(
+                    'research_personal_ai_unavailable' if personal else 'research_provider_unavailable',
+                    message,
+                    503,
+                )
             append_event(run_id, token, event_type, data, guard)
 
         def persist_completion(messages):
@@ -617,6 +632,18 @@ def submit_research_run(
         raise ResearchRunError(
             'hosted_integration_unapproved', '网站订阅研究集成尚未获批。', 503,
         )
+    if not authorization_requested:
+        # Accounts with a personal BYOK connection cannot use the transitional
+        # personal_clients_for_user path (it always raises). Require explicit
+        # consent+model instead of admitting an empty snapshot that surfaces as
+        # research_provider_unavailable.
+        from api.services.ai_execution import has_personal_connection
+        if has_personal_connection(user):
+            raise ResearchRunError(
+                'research_consent_required',
+                '选择已验证的研究模型来源并明确同意本次调用后才能发起。',
+                400,
+            )
     key = validate_idempotency_key(idempotency_key)
     if not isinstance(query, str) or not query.strip() or len(query) > 20_000:
         raise ResearchRunError('invalid_research_query', '研究问题长度不合法。', 400)
@@ -673,11 +700,20 @@ def submit_research_run(
             if authorization_requested:
                 from .execution import capture_snapshot, followup_snapshot
                 try:
+                    # Follow-up requires a saved native_continuation from a completed
+                    # answer. Failed/empty sessions have none; chat with explicit
+                    # consent must capture a fresh snapshot instead of 409
+                    # research_authorization_changed (UI otherwise shows incomplete).
+                    can_followup = (
+                        session_id is not None
+                        and isinstance(getattr(session, 'native_continuation', None), dict)
+                        and bool(session.native_continuation)
+                    )
                     execution_snapshot = (
                         followup_snapshot(
                             session, user, execution_source, model_config_id,
                         )
-                        if session_id is not None else capture_snapshot(
+                        if can_followup else capture_snapshot(
                             user, execution_source, model_config_id,
                         )
                     )
