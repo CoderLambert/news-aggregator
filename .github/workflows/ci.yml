@@ -327,7 +327,9 @@ jobs:
         env:
           RELEASE_SHA: ${{ github.sha }}
           NEWSHUB_IMAGE: newshub:ci-${{ github.sha }}
-        run: docker build --target production --build-arg "RELEASE_SHA=$RELEASE_SHA" --tag "$NEWSHUB_IMAGE" .
+        run: |
+          python3 ops/ci/build-production.py --sha "$RELEASE_SHA" --image "$NEWSHUB_IMAGE" \
+            --report "$RUNNER_TEMP/production-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
       - name: Build cached isolated G1 probe image
         # G1 HTTP, Chromium and SSE must run inside DinD's gateway network.
         # A persistent DinD Docker volume caches browser and Python image layers.

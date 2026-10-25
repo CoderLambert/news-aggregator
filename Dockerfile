@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# Keep the frontend and base images on the digests verified by CI #1036.
+# Upgrade these explicitly with dependency/release verification, not on every build.
 FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS rss-sync
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -19,7 +21,7 @@ COPY backend/ /app/backend/
 USER 10001:10001
 CMD ["python", "/app/backend/manage.py", "rss_sync_worker"]
 
-FROM node:22-bookworm-slim AS frontend-build
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,id=newshub-frontend-npm-v1,target=/root/.npm,sharing=locked \
@@ -27,7 +29,7 @@ RUN --mount=type=cache,id=newshub-frontend-npm-v1,target=/root/.npm,sharing=lock
 COPY frontend/ ./
 RUN npm run build
 
-FROM python:3.12-slim AS runtime-base
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS runtime-base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/backend \
@@ -59,9 +61,6 @@ CMD ["/app/docker-entrypoint.sh"]
 # Production is an explicit target so legacy development builds remain root
 # and can continue writing through compose.yaml's source/database bind mount.
 FROM runtime-base AS production
-ARG RELEASE_SHA
-RUN printf '%s\n' "${RELEASE_SHA:-}" | grep -Eq '^[0-9a-f]{40}$'
-LABEL org.opencontainers.image.revision="${RELEASE_SHA}"
 ENV HF_HOME=/var/lib/newshub/model-cache \
     HOME=/home/newshub
 RUN groupadd --gid 10001 newshub \
@@ -74,6 +73,10 @@ RUN groupadd --gid 10001 newshub \
         /var/lib/newshub/model-cache \
         /var/lib/newshub/logs \
     && chown -R 10001:10001 /var/lib/newshub /home/newshub
+# A new commit must not invalidate user/directory setup or dependency layers.
+ARG RELEASE_SHA
+RUN printf '%s\n' "${RELEASE_SHA:-}" | grep -Eq '^[0-9a-f]{40}$'
+LABEL org.opencontainers.image.revision="${RELEASE_SHA}"
 USER 10001:10001
 
 # Keep the default target aligned with the development compose contract.

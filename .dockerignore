@@ -41,3 +41,16 @@ coverage/
 **/*.log
 backend/media/
 .DS_Store
+
+# Local worktrees and agent artefacts must never enter any image context.
+.worktrees/
+.agents/
+.pi/
+
+# Non-runtime inputs: checked by CI from the checkout, not inside the image.
+# Preserve application migrations, templates, static files and G1 fixture code.
+docs/
+tests/
+backend/api/tests/
+frontend/tests/
+**/AGENTS.md

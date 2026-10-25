@@ -204,6 +204,25 @@ T00 根为后端工作卷的 `.cache/newshub-t00-venvs`。统一 GC 默认仅预
 
 **不要**在 Job 正在运行时删除缓存，不要使用 docker system prune、docker volume prune 或删除 newshub-ci 的状态卷。安装器会优先尊重显式 `PIP_CACHE_DIR` / `npm_config_cache`；未设置时下载缓存仍回退到对应持久 cache root 内，不应改为 checkout 临时目录。
 
+## 生产镜像构建输入与耗时诊断（CI-BUILD）
+
+生产 Dockerfile 固定到 CI #1036 已解析并成功构建过的 Python、Node 和 Dockerfile frontend digest，避免浮动标签更新在普通源码提交中隐式重建依赖链。基础镜像的安全更新仍需维护：显式修改 digest，核对 Python/Node 版本与架构，并在获准后执行完整镜像/G1 验收；固定 digest 不代表可以永久停止更新。npm/Torch/pip 下载缓存 ID 和安装指令保持不变，减少缓存方案自身造成的再次冷启动。
+
+`.dockerignore` 排除本地 `.worktrees/`、Agent 产物、文档和明确的测试目录，避免将嵌套工作树传给 Docker，或仅测试修改使 `COPY backend/`、`COPY frontend/` 的层失效。测试仍从 CI checkout 全量执行；迁移、模板、静态资源、应用代码和 `scripts/deploy/local_domain_fixtures.py` 保留。此规则也作用于根上下文的 development/rss 镜像，因此镜像自身不携带被排除的测试目录；开发源码 bind mount 和 CI checkout 仍包含它们。
+
+生产非 root 用户/目录创建位于 `ARG RELEASE_SHA` 之前。只有发布身份校验/标签依赖当前 SHA；每次构建仍验证完整 SHA，并以 `newshub:ci-<SHA>` 标记，G1 继续验证该镜像与同 SHA 静态资源。不按测试结果、缓存命中或源码指纹跳过正式镜像构建。
+
+CI 的生产镜像步骤调用：
+
+```bash
+python3 ops/ci/build-production.py --sha "$RELEASE_SHA" --image "$NEWSHUB_IMAGE" \
+  --report "$RUNNER_TEMP/production-build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+```
+
+该入口只允许 CI 私有 Docker socket 和与 SHA 一致的 CI tag，始终执行原来的 `docker build --target production`，增加 `--progress=plain`。实时输出原构建日志；JSON 与 GitHub Step Summary 记录 wall time、逐层执行/命中/失败状态、依赖层命中数。摘要只保存固定类别和耗时，不保存 RUN 输出、任意命令或下载 URL。构建退出码原样保留；摘要写入失败不能覆盖原构建错误，信号转发给构建进程组。该入口不安装依赖、不清理缓存、不重试失败构建，也不重启 Runner。
+
+**衡量方式**：BuildKit 并行层耗时不能相加；总时间使用 wrapper 的 wall time。`Using cached` wheel 是下载命中，只有 BuildKit 的 `CACHED` 才是安装层命中。要评估稳定提速，必须在获准后比较相同依赖/基础镜像和缓存条件下的完整成功运行，并至少覆盖纯测试改动、应用源码改动与依赖改动。109 秒冷层重建与 5 秒热层命中不是公平 A/B；本地离线回归也不代表已实测生产镜像时间。
+
 ## 7. 环境和故障
 
 ### GitHub Runner TLS 超时与项目级 Bridge MTU
