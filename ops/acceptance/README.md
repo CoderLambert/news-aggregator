@@ -4,6 +4,30 @@
 
 风格对齐 `ops/rss/T27` 的真实 SPA Playwright 用法，但本脚本默认 **headed + 分段暂停**，方便人工观察。
 
+## 一键启动（推荐）
+
+在仓库根目录执行：
+
+```bash
+./ops/acceptance/run_guided_uat.sh
+```
+
+脚本会自动：定位仓库根 → 选择已装 Playwright 的 Python → 从环境变量或 `ops/acceptance/.env.local`（或 `~/.config/newshub/acceptance.env`）加载凭据 → 探测 `NEWSHUB_BASE_URL`（默认 `http://127.0.0.1:9527`）→ 以 headed + 中文分段暂停启动 `guided_uat.py`。额外 CLI 参数会原样传给 Python 脚本。
+
+本地凭据文件示例（**勿提交**；仓库根 `.gitignore` 已忽略任意路径的 `.env.local`）：
+
+```bash
+# ops/acceptance/.env.local
+NEWSHUB_ACCEPTANCE_USER=admin
+NEWSHUB_ACCEPTANCE_PASSWORD=你的本地密码
+# 可选：
+# NEWSHUB_ACCEPTANCE_DEEPSEEK_KEY=sk-…
+```
+
+也可复制模板：`cp ops/acceptance/.env.local.example ops/acceptance/.env.local`。
+
+若运行时未启动，脚本会打印中文启动提示后退出（不会自动 `down -v` / recreate）。
+
 ## 前置
 
 - 本机已启动 `newshub-local-main`（默认 `http://127.0.0.1:9527`）
@@ -30,7 +54,9 @@ python3 -m playwright install chromium
 
 \* 仅「登录」及后续登录态步骤需要。未设置时脚本会停在登录段并提示。
 
-## 运行
+## 运行（手动）
+
+优先使用上方一键脚本。若需手动：
 
 ```bash
 cd /path/to/news-aggregator   # 或本 worktree
@@ -38,6 +64,7 @@ export NEWSHUB_ACCEPTANCE_USER=admin
 export NEWSHUB_ACCEPTANCE_PASSWORD='…'   # 本地密码，勿提交
 # 可选：export NEWSHUB_ACCEPTANCE_DEEPSEEK_KEY='sk-…'
 python3 ops/acceptance/guided_uat.py
+# 或：./ops/acceptance/run_guided_uat.sh
 ```
 
 无暂停连跑（仍打开窗口）：
