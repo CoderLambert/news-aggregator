@@ -130,6 +130,25 @@ class ValidatorUnitTests(unittest.TestCase):
             extra.rmdir()
             self.assertEqual(rules.check_repository(root), [])
 
+    def test_root_worktrees_are_independent_but_business_rules_are_not_hidden(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.synthetic_repository(root)
+            worktree = root / '.worktrees/task'
+            worktree.mkdir(parents=True)
+            self.synthetic_repository(worktree)
+            extra = worktree / 'backend/api/AGENTS.md'
+            extra.parent.mkdir(parents=True, exist_ok=True)
+            extra.write_text('# Unregistered inside the other worktree\n')
+            self.assertEqual(rules.check_repository(root), [])
+            self.assertTrue(any('unregistered Agent rule: backend/api/AGENTS.md' in err
+                                for err in rules.check_repository(worktree)))
+            hidden = root / 'backend/.worktrees/AGENTS.md'
+            hidden.parent.mkdir(parents=True)
+            hidden.write_text('# Business directory is still checked\n')
+            self.assertTrue(any('unregistered Agent rule: backend/.worktrees/AGENTS.md' in err
+                                for err in rules.check_repository(root)))
+
     def test_generated_dependencies_do_not_create_false_positive(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -144,6 +163,14 @@ class ValidatorUnitTests(unittest.TestCase):
 class RepositoryAgentContractTests(unittest.TestCase):
     def test_actual_repository_rules_and_skills(self):
         self.assertEqual(rules.check_repository(ROOT), [])
+
+    def test_build_release_policy_is_linked_and_has_valid_local_references(self):
+        policy = ROOT / 'ops/ci/build-release-policy.md'
+        rules.validate_markdown(policy.read_text(), policy, ROOT)
+        for relative in ('AGENTS.md', 'ops/ci/AGENTS.md', 'scripts/deploy/AGENTS.md', 'tests/AGENTS.md'):
+            with self.subTest(relative=relative):
+                self.assertIn('build-release-policy.md', (ROOT / relative).read_text())
+        self.assertIn('/.worktrees/', (ROOT / '.gitignore').read_text().splitlines())
 
     def test_frontend_and_backend_validation_entrypoints_exist(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()

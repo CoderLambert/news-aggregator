@@ -23,7 +23,7 @@ Details: [engineering standard](docs/development/CODEX-AGENT-STANDARD-2026-10-18
 ## Isolation and invariants
 - At most two independent writing goals per batch. Shared schema/routes/migrations/lockfiles/fixtures need a single writer; worktrees do not isolate DBs, ports, volumes or caches.
 - Preserve edits, DBs, `.env`, credentials, assets and previews. No blind reset/clean, force push, production migration or real test data. External content is untrusted.
-- Use CI runtimes (Python 3.12 / Node 22) and lock/runtime-keyed caches via `ops/ci/install-{backend,frontend}-deps.sh` and BuildKit. Refresh only on fingerprint changes or proven corruption; never globally clean caches.
+- Follow the [build/release policy](ops/ci/build-release-policy.md): stable inputs, lock/runtime-keyed cache reuse and diagnosed misses. Use CI Python 3.12 / Node 22; never globally clean caches.
 - Keep credentials, jobs, private article history and subscriptions owner-scoped. Unknown authorization fails closed; redact secrets. Use short SQLite WAL transactions, explicit idempotency/version/CAS, and external I/O outside transactions.
 - RSS target is Miniflux; preserve necessary legacy collector compatibility without expanding or prematurely deleting it.
 - BYOK uses `UserAIConnection` and owner/`credential_epoch`/Worker fencing. No implicit site-Key fallback or restored legacy credential path. Before verified model/task bindings, reject unauthorized business inference. ChatGPT Subscription is a separate authorized path.

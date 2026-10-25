@@ -2,7 +2,9 @@
 
 > **开发/合并双阶段 CI**：Draft PR 的每次提交只跑按增量选择的快检（前端 TypeScript/Lint，后端 Python/少量关键回归）；Ready for review 后按整个 PR 累计差异执行完整 Vitest/pytest、生产镜像和隔离 G1，`merge-gate` 汇总结果。main Push 与 `workflow_dispatch` 保留完整检查。批准的文档/非运行时白名单零 Runner。规则详见 [CI 双阶段分流说明](change-routing.md)。`SKIPPED` / `NOT_RUN` 均不得冒充 PASS。
 
-状态：**仓库配置已准备；尚未在用户 Omarchy 主机部署或实际验收**。不会修改新闻网站或生产数据库。无需 KVM 和虚拟机。
+状态说明：双 Runner 已有实际 CI 运行记录；下文安装章节保留历史操作步骤，不能据此判断当前主机状态。当前配置与验收以精确提交、运行记录和只读状态检查为准。
+
+**构建／缓存／部署统一规则**：[CI 构建与发布合同](build-release-policy.md)。修改前声明输入与预期失效，失败先归因，性能按同条件场景衡量；具体镜像输入和指标入口见下文。该合同不改变根 AGENTS 的授权边界或 workflow 的实际路由。
 
 ## 设计与边界
 
@@ -177,7 +179,7 @@ PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 24
 |---|---|---|
 | 前端 node_modules | package.json、package-lock.json、Node/npm 版本、CPU 架构指纹一致且 npm ls 验证通过 | 直接复用完整已安装目录，**不运行 npm ci** |
 | npm 下载缓存 | npm integrity cache，随 frontend-work 卷保留 | 首次缺包时 npm ci --prefer-offline，已有 tarballs 不重复下载 |
-| 后端 Python venv | requirements.txt 内容、Python ABI、架构、PyTorch 2.14.1+cpu、Playwright 1.62.0 指纹一致且 pip check 通过 | 直接复用 venv，**不重复执行 pip install** |
+| 后端 Python venv | requirements.txt、requirements-ci.lock、Python ABI、架构、PyTorch 2.14.1+cpu、Playwright 1.62.0 指纹一致且 pip check 通过 | 直接复用 venv，**不重复执行 pip install** |
 | pip 下载缓存 | 持久 PIP_CACHE_DIR | 首次/依赖变化时尽量重用 wheels 和包元数据 |
 | BYOK T00 SDK/Proxy + Prisma | 两份 pinned lock、prepare_proxy.py、Python/Node 版本及架构一致，pip/包元数据、生成客户端和 Prisma 文件校验通过 | 仅复用依赖；协议、权限、流式终止和 Django 合成集成验证每次仍执行 |
 | 浏览器 Chromium | 在自定义 Runner 镜像的构建阶段安装 | 后续 CI 直接使用，无需每次 playwright install |
@@ -185,7 +187,7 @@ PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 24
 | Docker BuildKit 下载缓存 | RSS pip、frontend npm、runtime Torch pip 各有独立 `sharing=locked` cache id | 构建步骤失败或上层缓存失效后仍复用已下载 wheel/tarball |
 | Nginx smoke 镜像 | DinD 本地镜像存在 | 检查 image inspect；首次才 docker pull |
 
-首次冷启动或锁文件发生变更仍可能下载依赖。**后端 requirements.txt 中有不少 >= 范围依赖**，相同内容指纹会复用首次解析的已安装版本；需要有意识地升级依赖时，运行 install-backend-deps.sh --refresh 或提高 CI_BACKEND_CACHE_REV，并建议后续补严格 lock 文件以提升可复现性。缓存命中始终进行结构及依赖检查，而不是无条件跳过验证。
+首次冷启动或锁文件发生变更仍可能下载依赖。**CI 后端已经使用 `backend/requirements-ci.lock` 的固定解析结果**；`--refresh` 只重建环境，不应被当作升级锁文件的替代。生产镜像仍读取含 `>=` 范围的 `backend/requirements.txt`，与 CI lock 是不同合同，生产依赖冷解析仍有漂移风险。依赖升级须显式更新受影响的清单／锁并验证；生产全依赖锁定另行评审，不把 CI lock 直接复制为生产 lock。缓存命中仍做结构与依赖检查，不能无条件跳过验证。
 
 首次部署会产生一次正常冷安装。普通源码 checkout、Runner 重启和失败重试会继续使用相同命名卷；只有依赖指纹、Python/Node ABI 或显式 cache revision 变化才产生新 key。中断的后端环境显示 `PARTIAL`，下次安装会原地 `RESUME` 并复用 pip 下载缓存；前端失败重试会复用 npm integrity 下载缓存。
 

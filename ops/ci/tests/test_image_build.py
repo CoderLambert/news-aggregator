@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "ops/ci/build-production.py"
@@ -255,9 +257,26 @@ class BuildInputContractTests(unittest.TestCase):
         runtime_base = text.split(' AS runtime-base', 1)[1].split('\nFROM ', 1)[0]
         self.assertLess(runtime_base.index('"torch==${TORCH_VERSION}"'), runtime_base.index('COPY backend/ /app/backend/'))
         self.assertLess(runtime_base.index('pip install -r /app/backend/requirements.txt'), runtime_base.index('COPY backend/ /app/backend/'))
+        self.assertNotIn('ARG RELEASE_SHA', runtime_base)
+        frontend = text.split(' AS frontend-build', 1)[1].split('\nFROM ', 1)[0]
+        self.assertLess(frontend.index('npm ci'), frontend.index('COPY frontend/ ./'))
+        self.assertNotIn('ARG RELEASE_SHA', frontend)
+        # Guard the approved Dockerfile's shell and JSON COPY/ADD forms.
+        # New instruction forms require reviewing/extending this contract.
+        for line in text.splitlines():
+            if re.match(r'^\s*(COPY|ADD)\s', line):
+                command = re.sub(r'^\s*(?:COPY|ADD)\s+(?:--\S+\s+)*', '', line)
+                if command.startswith('['):
+                    sources = json.loads(command)[:-1]
+                else:
+                    sources = command.split()[:-1]
+                self.assertFalse(any(source.strip('\"\'') in ('.', './') for source in sources), line)
 
     def test_only_explicit_nonruntime_trees_are_excluded(self):
         patterns = (ROOT / '.dockerignore').read_text().splitlines()
+        # An allowlist exception can reintroduce excluded inputs/secrets.
+        # Review such changes explicitly instead of accepting a later override.
+        self.assertFalse(any(line.strip().startswith('!') for line in patterns))
         for path in ('.worktrees/', '.agents/', '.pi/', 'docs/', 'tests/', 'backend/api/tests/', 'frontend/tests/'):
             self.assertIn(path, patterns)
         for path in ('backend/', 'frontend/', 'scripts/', '**/fixtures/', '**/migrations/', '**/static/', '**/templates/'):
@@ -265,6 +284,44 @@ class BuildInputContractTests(unittest.TestCase):
         # Existing secret and user-data exclusions must survive context tuning.
         for path in ('**/.env', '**/.env.*', '**/auth.json', '**/*.sqlite3', '**/*.key', '**/node_modules', '**/venv'):
             self.assertIn(path, patterns)
+
+
+class BuildGuardNegativeTests(unittest.TestCase):
+    def test_regressions_are_rejected_by_the_actual_build_contract(self):
+        dockerfile = (ROOT / 'Dockerfile').read_text()
+        ignore = (ROOT / '.dockerignore').read_text()
+        mutations = [
+            ('floating base', re.sub(r'(FROM node:[^@\s]+)@sha256:[a-f0-9]{64}', r'\1', dockerfile), ignore,
+             'test_external_images_are_digest_pinned_and_revision_is_late'),
+            ('early backend source', dockerfile.replace('COPY backend/requirements.txt', 'COPY backend/ /app/backend/\nCOPY backend/requirements.txt', 1), ignore,
+             'test_external_images_are_digest_pinned_and_revision_is_late'),
+            ('early frontend source', dockerfile.replace('COPY frontend/package.json', 'COPY frontend/ ./\nCOPY frontend/package.json', 1), ignore,
+             'test_external_images_are_digest_pinned_and_revision_is_late'),
+            ('early revision', dockerfile.replace(' AS runtime-base\n', ' AS runtime-base\nARG RELEASE_SHA\n'), ignore,
+             'test_external_images_are_digest_pinned_and_revision_is_late'),
+            ('broad context', dockerfile + '\nCOPY . /app\n', ignore,
+             'test_external_images_are_digest_pinned_and_revision_is_late'),
+            ('broad JSON context', dockerfile + '\nCOPY [".", "/app"]\n', ignore,
+             'test_external_images_are_digest_pinned_and_revision_is_late'),
+            ('lost test exclusion', dockerfile, ignore.replace('backend/api/tests/\n', ''),
+             'test_only_explicit_nonruntime_trees_are_excluded'),
+            ('reintroduced test', dockerfile, ignore + '\n!backend/api/tests/example.py\n',
+             'test_only_explicit_nonruntime_trees_are_excluded'),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            # Positive control: the guard must accept the approved input first.
+            (root / 'Dockerfile').write_text(dockerfile)
+            (root / '.dockerignore').write_text(ignore)
+            with patch.dict(globals(), ROOT=root):
+                BuildInputContractTests().test_external_images_are_digest_pinned_and_revision_is_late()
+                BuildInputContractTests().test_only_explicit_nonruntime_trees_are_excluded()
+            for name, changed_dockerfile, changed_ignore, method in mutations:
+                with self.subTest(name=name):
+                    (root / 'Dockerfile').write_text(changed_dockerfile)
+                    (root / '.dockerignore').write_text(changed_ignore)
+                    with patch.dict(globals(), ROOT=root), self.assertRaises(AssertionError):
+                        getattr(BuildInputContractTests(), method)()
 
 
 if __name__ == '__main__':
