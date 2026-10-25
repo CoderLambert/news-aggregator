@@ -98,22 +98,30 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
     can_rss_refetch = serializers.SerializerMethodField()
 
     def get_can_rss_refetch(self, obj):
+        cache = getattr(self, '_can_rss_refetch_by_pk', None)
+        if cache is not None and obj.pk in cache:
+            return cache[obj.pk]
         from django.conf import settings
         if not getattr(settings, 'RSS_FULL_CONTENT_ENABLED', False):
-            return False
-        from api.rss.access import authorized_sources, ALL_ENTRIES
-        from api.rss.models import EngineEntryMap, SourceFeedLink
-        from django.db.models import F
-        user = getattr(self.context.get('request'), 'user', None)
-        if not user or not user.is_authenticated or not user.is_active or not obj.body_owner_binding_id:
-            return False
-        return (EngineEntryMap.objects.filter(news_id=obj.pk, binding_id=obj.body_owner_binding_id,
-                    disposition='linked', source_url=obj.url).exists()
-            and SourceFeedLink.objects.filter(binding_id=obj.body_owner_binding_id, enabled=True,
-                association_policy=ALL_ENTRIES, source__in=authorized_sources(user, body=True),
-                source__publication__owner='miniflux', binding__desired_mode='full_content',
-                binding__desired_enabled=True, binding__connection_state='ready',
-                binding__applied_policy_version=F('binding__policy_version')).exists())
+            result = False
+        else:
+            from api.rss.access import authorized_sources, ALL_ENTRIES
+            from api.rss.models import EngineEntryMap, SourceFeedLink
+            from django.db.models import F
+            user = getattr(self.context.get('request'), 'user', None)
+            if not user or not user.is_authenticated or not user.is_active or not obj.body_owner_binding_id:
+                result = False
+            else:
+                result = (EngineEntryMap.objects.filter(news_id=obj.pk, binding_id=obj.body_owner_binding_id,
+                            disposition='linked', source_url=obj.url).exists()
+                    and SourceFeedLink.objects.filter(binding_id=obj.body_owner_binding_id, enabled=True,
+                        association_policy=ALL_ENTRIES, source__in=authorized_sources(user, body=True),
+                        source__publication__owner='miniflux', binding__desired_mode='full_content',
+                        binding__desired_enabled=True, binding__connection_state='ready',
+                        binding__applied_policy_version=F('binding__policy_version')).exists())
+        if cache is not None:
+            cache[obj.pk] = result
+        return result
 
     def get_can_fetch_full_content(self, obj):
         return bool(obj.body_owner_binding_id and self.get_can_rss_refetch(obj))
@@ -192,9 +200,26 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
         user = getattr(self.context.get('request'), 'user', None)
         # Bound only to this synchronous representation, never across requests.
         self._translation_key = None
+        self._can_rss_refetch_by_pk = {}
         self._current_stored = self._load_stored(user, instance)
         snapshots = getattr(self, '_preview_snapshots', None)
-        self._current_sources = snapshots[instance.pk][1] if snapshots is not None else list(article_sources(user, instance).select_related('publication'))
+        if snapshots is not None:
+            self._current_sources = snapshots[instance.pk][1]
+        else:
+            # Reuse ACL source_ids from the stored/access snapshot — avoid a
+            # second article_sources round-trip on the detail hot path.
+            access = getattr(self._current_stored, 'access', None)
+            source_ids = getattr(access, 'source_ids', None) if access is not None else None
+            if source_ids:
+                by_id = {
+                    source.pk: source
+                    for source in Source.objects.filter(pk__in=source_ids).select_related('publication')
+                }
+                self._current_sources = [by_id[pk] for pk in source_ids if pk in by_id]
+            else:
+                self._current_sources = list(
+                    article_sources(user, instance).select_related('publication')
+                )
         try:
             data = super().to_representation(instance)
             stored = self._current_stored
@@ -251,6 +276,7 @@ class ChannelNewsSerializer(serializers.ModelSerializer):
             return data
         finally:
             self._current_stored = self._current_sources = None
+            self._can_rss_refetch_by_pk = None
 
 
 class NewsListSerializer(ChannelNewsSerializer):
@@ -306,7 +332,8 @@ class NewsListSerializer(ChannelNewsSerializer):
         snapshots = getattr(self, '_preview_snapshots', None)
         context = snapshots[obj.pk][0] if snapshots is not None else get_article_access(user, obj.pk)
         return SimpleNamespace(news_id=obj.pk, scope=context.scope, markdown=obj.content,
-                               completeness=context.completeness, body_owner=context.body_owner)
+                               completeness=context.completeness, body_owner=context.body_owner,
+                               access=context)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -395,7 +422,11 @@ class NewsDetailSerializer(ChannelNewsSerializer):
         key = (stored.news_id, stored.canonical_hash, stored.scope)
         if getattr(self, '_translation_key', None) != key:
             self._translation_key = key
-            self._translation_value = current_translation(getattr(self.context.get('request'), 'user', None), stored)
+            # stored was loaded for this representation; skip a same-request
+            # require_current/get_stored_article round-trip on the detail path.
+            self._translation_value = current_translation(
+                getattr(self.context.get('request'), 'user', None), stored, revalidate=False,
+            )
         return self._translation_value
 
     def get_full_content_zh(self, obj):
@@ -443,7 +474,7 @@ class NewsDetailSerializer(ChannelNewsSerializer):
             'source_title': record.source_title,
             'source_revision': record.source_revision,
             'completed_at': record.completed_at,
-        } for record in private_translation_history(user, self._stored(obj))]
+        } for record in private_translation_history(user, self._stored(obj), revalidate=False)]
 
     def get_full_translation_personal_available(self, obj):
         from api.services.chatgpt_subscription import active_connection_for_user
@@ -499,11 +530,15 @@ class FavoriteNewsSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField()
 
     def to_representation(self, instance):
-        from api.rss.access import article_sources, get_article_access
+        from api.rss.access import get_article_access
         user = getattr(self.context.get('request'), 'user', None)
-        get_article_access(user, instance.pk)
+        access = get_article_access(user, instance.pk)
         data = super().to_representation(instance)
-        sources = list(article_sources(user, instance).select_related('publication'))
+        by_id = {
+            source.pk: source
+            for source in Source.objects.filter(pk__in=access.source_ids).select_related('publication')
+        }
+        sources = [by_id[pk] for pk in access.source_ids if pk in by_id]
         if not sources:
             from django.http import Http404
             raise Http404

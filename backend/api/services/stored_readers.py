@@ -9,6 +9,15 @@ class StoredContentChanged(Exception):
     pass
 
 
+def _ensure_active_reader(user):
+    """Refuse inactive/deleted actors without reloading the article snapshot."""
+    if not getattr(user, 'is_authenticated', False):
+        return
+    from django.contrib.auth import get_user_model
+    if get_user_model().objects.filter(pk=user.pk, is_active=True).first() is None:
+        raise Http404
+
+
 def article_snapshot(news, user=None):
     return get_stored_article(user if user is not None else getattr(news, '_rss_access_user', None), news.pk)
 
@@ -97,13 +106,16 @@ def _valid_private_translation(record, user, stored):
     return True
 
 
-def _private_translation_for_hash(user, stored, source_hash=None, result_id=None):
+def _private_translation_for_hash(user, stored, source_hash=None, result_id=None, *, revalidate=True):
     from api.models import ChatGPTArticleTranslation
     if not getattr(user, 'is_authenticated', False):
         if result_id is not None:
             raise PrivateTranslationNotFound
         return None
-    require_current(user, stored, full=True)
+    if revalidate:
+        require_current(user, stored, full=True)
+    else:
+        _ensure_active_reader(user)
     query = ChatGPTArticleTranslation.objects.select_related(
         'task', 'api_connection',
     ).filter(
@@ -137,12 +149,15 @@ def _private_translation_for_hash(user, stored, source_hash=None, result_id=None
     return None
 
 
-def private_translation_history(user, stored, *, limit=50):
+def private_translation_history(user, stored, *, limit=50, revalidate=True):
     """Return recent validated owner-private results under the current full-body ACL."""
     if stored.scope != 'full' or not getattr(user, 'is_authenticated', False):
         return []
     from api.models import ChatGPTArticleTranslation
-    require_current(user, stored, full=True)
+    if revalidate:
+        require_current(user, stored, full=True)
+    else:
+        _ensure_active_reader(user)
     query = ChatGPTArticleTranslation.objects.select_related(
         'task', 'api_connection',
     ).filter(
@@ -177,16 +192,29 @@ def translation_for_read(user, stored, result_id=None):
     return current_translation(user, stored)
 
 
-def current_translation(user, stored, *, include_private=True):
-    """Current-source translation: owner-private BYOK, subscription, shared, then legacy."""
+def current_translation(user, stored, *, include_private=True, revalidate=True):
+    """Current-source translation: owner-private BYOK, subscription, shared, then legacy.
+
+    revalidate=True (default) re-reads the stored ACL snapshot before resolving
+    a translation. Synchronous serializers that just loaded ``stored`` in the
+    same request may pass revalidate=False to avoid a duplicate hot-path read.
+    Long-lived chat/TTS/job paths must keep the default.
+    """
     from api.models import ChatGPTArticleTranslation, SharedArticleTranslation
     from api.services.chatgpt_subscription import active_connection_for_user
     from api.services.shared_translations import cache_key
-    require_current(user, stored)
+    if revalidate:
+        require_current(user, stored)
+    else:
+        # Same-request serializers skip the snapshot re-read, but must still
+        # refuse inactive/deleted actors (require_current's auth gate).
+        _ensure_active_reader(user)
     if stored.scope != 'full':
         return None, None
     if include_private and getattr(user, 'is_authenticated', False):
-        record = _private_translation_for_hash(user, stored, source_hash=stored.canonical_hash)
+        record = _private_translation_for_hash(
+            user, stored, source_hash=stored.canonical_hash, revalidate=revalidate,
+        )
         if record is not None:
             return record, 'private'
     connection = active_connection_for_user(user) if include_private and getattr(user, 'is_authenticated', False) else None

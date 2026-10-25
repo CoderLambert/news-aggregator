@@ -202,7 +202,11 @@ function ResearchPanelView({
 
   function handleSendQuery() {
     if (!input.trim() || isLoading || hasRecoverableTask || !user || researchModelUnavailable) return
+    // Do not admit an unauthenticated create while preferences are unknown; that
+    // path hits personal_clients_for_user and becomes「研究服务暂时不可用」.
+    if (taskPreferences.isLoading || taskPreferences.isPending) return
     if (authorizedCreateOnly && (recoveryAction === 'retry' || !hasResearchModel)) return
+    if ((authorizedCreateOnly || hasPersonalSelection || hasResearchModel) && !researchAuthorization) return
     const submittedInput = input
     if (hasResearchModel && !billingConsent) return
     void handleSend(input.trim(), {
@@ -217,7 +221,9 @@ function ResearchPanelView({
   }
 
   function handleRetryQuery() {
+    if (taskPreferences.isLoading || taskPreferences.isPending) return
     if (hasResearchModel && !billingConsent) return
+    if ((authorizedCreateOnly || hasPersonalSelection || hasResearchModel) && !researchAuthorization) return
     void handleRetry(researchAuthorization).then((accepted) => {
       if (accepted) setBillingConsentState({ key: '', checked: false })
     })

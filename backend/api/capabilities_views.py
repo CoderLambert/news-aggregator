@@ -66,13 +66,16 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
         and settings.DJANGO_ENV != "production"
         and getattr(settings, "CHATGPT_PLAN_USAGE_ENABLED", False)
     )
+    # BYOK/subscription research create is independent of PUBLIC_AI_ENABLED.
+    # Local full stacks with PUBLIC_AI still need this flag so the UI requires
+    # explicit consent+model; otherwise creates fall into personal_clients_for_user
+    # which refuses inference and the worker remaps that to provider_unavailable.
     authorized_create_enabled = (
         settings.PUBLIC_SITE_MODE == "full"
         and (
             getattr(settings, "AI_BYOK_ENABLED", False)
             or subscription_create_enabled
         )
-        and (settings.DJANGO_ENV == "production" or not settings.PUBLIC_AI_ENABLED)
     )
     features["research_byok_create"] = _feature(
         authorized_create_enabled,

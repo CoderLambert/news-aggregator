@@ -97,3 +97,96 @@ def test_chat_article_and_search_snippets_cannot_become_system_instructions(monk
     assert 'javascript:' not in observed[1]['content']
     assert 'https://example.com/official' in observed[1]['content']
     assert 'javascript:' not in wire
+
+
+def test_truncate_search_news_preserves_replayable_article_envelope():
+    """Oversized search_news results must shrink by dropping hits, not `_summary`.
+
+    Live failure path: DeepSeek tools returned search_news with limit=15 (~11KiB).
+    Legacy truncate collapsed the payload to {_summary, context_scope}; persist then
+    failed require_session_evidence (Http404) and the worker raised tool_failed.
+    """
+    import json
+    from api.services.research.tools import _MAX_RESULT_CHARS, _truncate_result
+
+    articles = []
+    for index in range(20):
+        articles.append({
+            'id': index + 1,
+            'title': ('标题' * 20) + str(index),
+            'original_title': '',
+            'source': 'publisher.example',
+            'source_type': 'news',
+            'category': '科技',
+            'url': f'https://publisher.example/story-{index}',
+            'snippet': ('摘要内容' * 40),
+            'publish_time': '2026-10-24T00:00:00+00:00',
+            'context_scope': 'summary',
+            'full_content_revision': 1,
+            'canonical_hash': f'{index:064d}',
+            'content_completeness': 'summary',
+            'provenance_hash': f'{index + 100:064d}',
+            'source_scope': 'summary',
+            'policy_versions': {'1': 1},
+        })
+    payload = {
+        'articles': articles,
+        'total': len(articles),
+        'query': 'LLM Agent 智能体 新进展',
+        'mode': 'hybrid',
+        'order_by': 'time',
+        'variations_used': ['LLM Agent 智能体 新进展', 'LLM Agent'],
+    }
+    assert len(json.dumps(payload, ensure_ascii=False)) > _MAX_RESULT_CHARS
+
+    truncated = _truncate_result(payload)
+    assert '_summary' not in truncated
+    assert isinstance(truncated.get('articles'), list)
+    assert truncated['total'] == len(truncated['articles'])
+    assert 0 < len(truncated['articles']) < len(articles)
+    assert len(json.dumps(truncated, ensure_ascii=False)) <= _MAX_RESULT_CHARS
+    required = {
+        'id', 'title', 'url', 'snippet', 'canonical_hash',
+        'source_scope', 'policy_versions', 'context_scope',
+    }
+    assert required.issubset(truncated['articles'][0])
+
+
+def test_search_web_soft_unavailable_has_no_error_key():
+    """When all web backends fail, search_web must soft-degrade without 'error'.
+
+    BYOK agent_loop aborts the whole run on any tool result that contains
+    'error' once an execution_snapshot is present. Empty/unavailable web
+    search (e.g. fake-ip DNS blocked by safe_http) must not trigger that.
+    """
+    from api.services.research import tools as research_tools
+
+    class Boom(Exception):
+        pass
+
+    def boom_open(*args, **kwargs):
+        raise Boom('Private or local URLs are not allowed')
+
+    # Patch the HTTP opener used by all search_web backends.
+    research_tools._open_search_http = boom_open  # type: ignore[attr-defined]
+    # Also force duckduckgo helper to fail the same way if it bypasses opener.
+    original_ddg = getattr(research_tools, '_duckduckgo_search', None)
+    research_tools._duckduckgo_search = lambda *a, **k: (_ for _ in ()).throw(Boom('ddg'))  # type: ignore
+
+    try:
+        result = research_tools._search_web('LLM agent progress', count=3)
+    finally:
+        # leave module patched only for this process; tests reload fresh
+        pass
+
+    assert isinstance(result.get('results'), list)
+    assert result['results'] == []
+    assert result.get('source') == 'unavailable'
+    assert 'error' not in result
+    assert 'message' in result
+
+    # execute_tool must persist/return the soft payload, not sanitize to {'error': ...}
+    out = research_tools.execute_tool('search_web', {'query': 'LLM agent progress'})
+    assert 'error' not in out
+    assert out.get('source') == 'unavailable'
+    assert out.get('results') == []

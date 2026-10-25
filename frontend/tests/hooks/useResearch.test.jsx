@@ -602,8 +602,10 @@ describe('useResearch stream lifecycle', () => {
 
     const authorization = { executionSource: 'chatgpt_subscription', consent: true }
     await act(async () => { await result.current.handleRetry(authorization) })
-    expect(api.researchChatStream).toHaveBeenCalledWith(
-      'session-error',
+    // Empty failed create has startingMessageCount 0 → retry must create, not /chat/.
+    expect(api.researchChatStream).not.toHaveBeenCalled()
+    expect(api.createResearchStream).toHaveBeenCalledTimes(2)
+    expect(api.createResearchStream).toHaveBeenLastCalledWith(
       '研究失败后重试',
       expect.objectContaining({ authorization }),
     )
@@ -678,17 +680,24 @@ describe('useResearch stream lifecycle', () => {
     await waitFor(() => expect(result.current.phase).toBe('cancelled'))
     expect(result.current.recoveryAction).toBe('retry')
 
+    // Late-header create never checkpointed messages; retry starts a fresh create.
+    api.createResearchStream.mockImplementation((_query, options) => {
+      retrySignal = options.signal
+      options.onRunId?.('run-explicit-retry')
+      return (async function* retryStream() {
+        yield { type: 'thinking' }
+        await waitForAbort(options.signal)
+        throw new DOMException('The operation was aborted', 'AbortError')
+      })()
+    })
     await act(async () => { await result.current.handleRetry() })
-    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledWith(
-      'session-late-header',
-      '提交后响应头延迟',
-      expect.objectContaining({ signal: expect.any(AbortSignal), localOnly: false }),
-    ))
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(2))
+    expect(api.researchChatStream).not.toHaveBeenCalled()
     await waitFor(() => expect(result.current.phase).toBe('thinking'))
     act(() => { void result.current.handleSend('不要重复发出任务') })
     expect(retrySignal.aborted).toBe(false)
-    expect(api.createResearchStream).toHaveBeenCalledTimes(1)
-    expect(api.researchChatStream).toHaveBeenCalledTimes(1)
+    expect(api.createResearchStream).toHaveBeenCalledTimes(2)
+    expect(api.researchChatStream).not.toHaveBeenCalled()
     await act(async () => { await result.current.handleCancel() })
   })
 
@@ -699,7 +708,8 @@ describe('useResearch stream lifecycle', () => {
     api.listResearchSessions.mockResolvedValue(emptyPage([{ id: history.id, title: history.title }]))
     api.getResearchSession.mockResolvedValue(history)
     api.openResearchSessionStream.mockReturnValue(delayedProbe)
-    api.researchChatStream.mockImplementation(async function* chat() {
+    api.createResearchStream.mockImplementation(async function* create() {
+      yield { type: 'session_created', session_id: 'history-pending-created' }
       yield { type: 'text_delta', text: '新问题已接受' }
       yield { type: 'complete' }
     })
@@ -729,12 +739,12 @@ describe('useResearch stream lifecycle', () => {
       acceptedAfterProbe = await result.current.handleSend('探测结束后提交')
     })
     expect(acceptedAfterProbe).toBe(true)
-    await waitFor(() => expect(api.researchChatStream).toHaveBeenCalledWith(
-      history.id,
+    // Empty history has message_count 0 → no native_continuation; start create.
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledWith(
       '探测结束后提交',
       expect.objectContaining({ signal: expect.any(AbortSignal), localOnly: false }),
     ))
-    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
   })
 
   it('does not restore another viewer’s sessionStorage recovery record', async () => {
