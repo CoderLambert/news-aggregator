@@ -581,6 +581,24 @@ class ReleaseManifestTests(unittest.TestCase):
 
 
 class CollectionAndWorkflowTests(unittest.TestCase):
+    def test_release_dockerfile_persists_three_independent_download_caches(self) -> None:
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        expected_mounts = {
+            "newshub-rss-pip-v1": "target=/root/.cache/pip",
+            "newshub-frontend-npm-v1": "target=/root/.npm",
+            "newshub-runtime-torch-pip-v1": "target=/root/.cache/pip",
+        }
+        for cache_id, target in expected_mounts.items():
+            mount = f"--mount=type=cache,id={cache_id},{target},sharing=locked"
+            self.assertEqual(dockerfile.count(mount), 1, cache_id)
+        self.assertEqual(len(expected_mounts), len(set(expected_mounts)))
+        self.assertIn("AS rss-sync", dockerfile)
+        self.assertIn("AS frontend-build", dockerfile)
+        self.assertIn("ARG TORCH_VERSION=2.14.1+cpu", dockerfile)
+        self.assertIn('"torch==${TORCH_VERSION}"', dockerfile)
+        self.assertIn("-r /app/backend/requirements-rss.lock", dockerfile)
+        self.assertIn("npm ci", dockerfile)
+
     def test_root_pytest_config_includes_api_root_and_unified_patterns(self) -> None:
         values: dict[str, str] = {}
         for line in (ROOT / "pytest.ini").read_text(encoding="utf-8").splitlines():

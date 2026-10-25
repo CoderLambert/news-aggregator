@@ -22,6 +22,7 @@ WATCH = ROOT / "ops/ci/watch.py"
 WATCH_SERVICE = ROOT / "ops/ci/watch-service.sh"
 CHECK_LOCK = ROOT / "ops/ci/check-backend-lock.py"
 CACHE_SUMMARY = ROOT / "ops/ci/cache-summary.sh"
+CACHE_MAINTENANCE = ROOT / "ops/ci/cache-maintenance.py"
 CI_LOCK = ROOT / "backend/requirements-ci.lock"
 
 
@@ -393,6 +394,46 @@ class SelfHostedCIContract(unittest.TestCase):
         self.assertIn("npm_config_cache", cfg["services"]["runner-frontend"]["environment"])
         self.assertIn("PIP_CACHE_DIR", cfg["services"]["runner"]["environment"])
         self.assertIn("docker-data:/var/lib/docker", cfg["services"]["docker"]["volumes"])
+
+    def test_maintenance_services_isolate_cache_volumes(self):
+        services = load(COMPOSE)["services"]
+        backend = services["cache-backend"]
+        frontend = services["cache-frontend"]
+        self.assertEqual(backend["profiles"], ["maintenance"])
+        self.assertEqual(frontend["profiles"], ["maintenance"])
+        self.assertEqual(backend["user"], "1001:121")
+        self.assertEqual(frontend["user"], "1001:121")
+        self.assertIn("--cache-only", backend["command"])
+        self.assertIn("--cache-only", frontend["command"])
+        backend_volumes = str(backend["volumes"])
+        frontend_volumes = str(frontend["volumes"])
+        self.assertIn("runner-work", backend_volumes)
+        self.assertNotIn("frontend-work", backend_volumes)
+        self.assertIn("frontend-work", frontend_volumes)
+        self.assertNotIn("runner-work", frontend_volumes)
+        for service in (backend, frontend):
+            source_mount = next(v for v in service["volumes"] if isinstance(v, dict))
+            self.assertEqual(source_mount["target"], "/source")
+            self.assertTrue(source_mount["read_only"])
+            self.assertNotIn("privileged", service)
+
+    def test_manage_warms_cache_before_listener_start(self):
+        script = MANAGE.read_text(encoding="utf-8")
+        self.assertIn("cache-status|warm-cache|cache-gc", script)
+        self.assertIn("cache-maintenance.py", script)
+        for command in ("install", "start", "update"):
+            block = script.split(f"    {command})", 1)[1].split("        ;;", 1)[0]
+            self.assertIn("warm_cache", block)
+            self.assertLess(block.index("warm_cache"), block.index("compose up"))
+        update = script.split("    update)", 1)[1].split("        ;;", 1)[0]
+        self.assertLess(update.index("compose stop"), update.index("warm_cache"))
+
+    def test_cache_summary_uses_read_only_installer_status(self):
+        summary = CACHE_SUMMARY.read_text(encoding="utf-8")
+        self.assertIn('install-backend-deps.sh" --status', summary)
+        self.assertIn('install-frontend-deps.sh" --status', summary)
+        self.assertNotIn("du -sh", summary)
+        self.assertTrue(CACHE_MAINTENANCE.is_file())
 
     def test_boot_watchdog_is_safe_and_opt_in_for_linger(self):
         ci = CI.read_text(encoding="utf-8")

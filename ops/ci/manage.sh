@@ -10,12 +10,13 @@ DATA_DIR="${CI_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/newshub-ci}"
 BACKEND_TOKEN_FILE="$DATA_DIR/registration-token"
 FRONTEND_TOKEN_FILE="$DATA_DIR/registration-token-frontend"
 COMMAND="${1:-help}"
+COMMAND_OPTION="${2:-}"
 MANUAL_STOP_FLAG="$DATA_DIR/maintenance-disabled"
 
 die() { printf 'newshub-ci: %s\n' "$*" >&2; exit 2; }
 usage() {
     cat <<'HELP'
-Usage: bash ops/ci/manage.sh <install|start|stop|status|logs|update|doctor|watch|enable-watch|disable-watch|watch-logs|uninstall>
+Usage: bash ops/ci/manage.sh <install|start|stop|status|logs|update|doctor|watch|enable-watch|disable-watch|watch-logs|cache-status|warm-cache|cache-gc|uninstall>
   install   Build/register two runners; enable the boot/watchdog timer.
   start     Start both registered runners without requesting new tokens.
   stop      Stop runner and its private DinD (does not delete volumes).
@@ -27,6 +28,9 @@ Usage: bash ops/ci/manage.sh <install|start|stop|status|logs|update|doctor|watch
   enable-watch   Install the user-systemd health timer.
   disable-watch  Disable this user-systemd health timer.
   watch-logs     Show recent health timer logs.
+  cache-status   Read backend and frontend dependency-cache status.
+  warm-cache     Stop idle listeners, populate both caches, then restore them.
+  cache-gc       Dry-run targeted cache cleanup; add --execute to remove.
   uninstall Stop/delete only this Compose project's containers and networks.
             Does NOT remove volumes or unregister the GitHub-side runner.
   Unattended before-login watchdog: sudo loginctl enable-linger "$USER"
@@ -67,7 +71,7 @@ preflight() {
     endpoint="$(docker context inspect "$(docker context show)" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
     [[ "$endpoint" == unix://* || "${DOCKER_HOST:-}" == unix://* ]] \
         || die "Refusing to mutate a non-Unix/remote Docker daemon"
-    if [[ "$COMMAND" != doctor ]]; then
+    if [[ "$COMMAND" != doctor && "$COMMAND" != cache-status ]]; then
         prepare_paths
     fi
     compose config --quiet || die "Compose configuration invalid"
@@ -140,6 +144,31 @@ report_status() {
             || printf 'GitHub runner status API unavailable; check repository Actions settings.\n'
     fi
 }
+warm_cache() {
+    compose run --rm --no-deps volume-init
+    compose --profile maintenance run --rm --no-deps cache-backend
+    compose --profile maintenance run --rm --no-deps cache-frontend
+}
+cache_status() {
+    compose --profile maintenance run --rm --no-deps cache-backend \
+        /source/ops/ci/install-backend-deps.sh --status
+    compose --profile maintenance run --rm --no-deps cache-frontend \
+        /source/ops/ci/install-frontend-deps.sh --status
+}
+cache_gc() {
+    local execute=()
+    case "$COMMAND_OPTION" in
+        "") ;;
+        --execute) execute=(--execute) ;;
+        *) die "Usage: bash ops/ci/manage.sh cache-gc [--execute]" ;;
+    esac
+    compose --profile maintenance run --rm --no-deps --entrypoint python3 cache-backend \
+        /source/ops/ci/cache-maintenance.py gc \
+        --root /ci-work/_work/.cache/newshub-venvs "${execute[@]}"
+    compose --profile maintenance run --rm --no-deps --entrypoint python3 cache-frontend \
+        /source/ops/ci/cache-maintenance.py gc \
+        --root /ci-frontend/_work/.cache/newshub-node-modules "${execute[@]}"
+}
 
 case "$COMMAND" in
     help|-h|--help) usage ;;
@@ -158,6 +187,7 @@ case "$COMMAND" in
         if configured runner && configured runner-frontend; then require_idle; fi
         # Build once: runner-frontend reuses the exact same local image.
         compose build runner
+        warm_cache
         trap clear_tokens EXIT
         if configured runner; then
             printf 'Backend runner identity found; reusing it.\n'
@@ -187,6 +217,7 @@ case "$COMMAND" in
         configured runner && configured runner-frontend || die "Both runners must be registered; run install"
         require_idle
         rm -f -- "$MANUAL_STOP_FLAG"
+        warm_cache
         compose up -d --no-build
         report_status
         ;;
@@ -208,7 +239,10 @@ case "$COMMAND" in
         preflight
         require_idle
         configured runner && configured runner-frontend || die "Both runners must be registered; run install"
-        compose up -d --build
+        compose build runner
+        compose stop runner runner-frontend
+        warm_cache
+        compose up -d --no-build
         wait_for_registration runner && wait_for_registration runner-frontend || die "One of two runners not ready after update"
         confirm_both_online || die "GitHub has not reported both Runners Online after update"
         report_status
@@ -225,6 +259,26 @@ case "$COMMAND" in
         ;;
     watch-logs)
         journalctl --user -u newshub-ci-watch.service --no-pager -n 100
+        ;;
+    cache-status)
+        preflight
+        cache_status
+        ;;
+    warm-cache)
+        preflight
+        configured runner && configured runner-frontend || die "Both runners must be registered; run install"
+        require_idle
+        compose stop runner runner-frontend
+        warm_cache
+        compose up -d --no-build runner runner-frontend
+        ;;
+    cache-gc)
+        preflight
+        configured runner && configured runner-frontend || die "Both runners must be registered; run install"
+        require_idle
+        compose stop runner runner-frontend
+        cache_gc
+        compose up -d --no-build runner runner-frontend
         ;;
     uninstall)
         preflight

@@ -161,6 +161,44 @@ services:
       retries: 4
       start_period: 40s
 
+  cache-backend:
+    profiles: ["maintenance"]
+    image: newshub/ci-runner:local
+    user: "1001:121"
+    working_dir: /source
+    entrypoint: ["/bin/bash"]
+    command: ["/source/ops/ci/install-backend-deps.sh", "--cache-only"]
+    environment:
+      XDG_CACHE_HOME: /ci-work/_work/.cache
+      PIP_CACHE_DIR: /ci-work/_work/.cache/pip
+      CI_BACKEND_CACHE_ROOT: /ci-work/_work/.cache/newshub-venvs
+      CI_BACKEND_CACHE_REV: ${CI_BACKEND_CACHE_REV:-1}
+    volumes:
+      - runner-work:/ci-work/_work
+      - type: bind
+        source: ../..
+        target: /source
+        read_only: true
+
+  cache-frontend:
+    profiles: ["maintenance"]
+    image: newshub/ci-runner:local
+    user: "1001:121"
+    working_dir: /source
+    entrypoint: ["/bin/bash"]
+    command: ["/source/ops/ci/install-frontend-deps.sh", "--cache-only"]
+    environment:
+      XDG_CACHE_HOME: /ci-frontend/_work/.cache
+      npm_config_cache: /ci-frontend/_work/.cache/npm
+      CI_FRONTEND_CACHE_ROOT: /ci-frontend/_work/.cache/newshub-node-modules
+      CI_FRONTEND_CACHE_REV: ${CI_FRONTEND_CACHE_REV:-1}
+    volumes:
+      - frontend-work:/ci-frontend/_work
+      - type: bind
+        source: ../..
+        target: /source
+        read_only: true
+
 # Keep this project's Docker bridge below tunnel path MTU. GitHub TLS
 # handshakes on Omarchy failed at 1500; pin both bridges to the requested 1200.
 # This does not require host networking or global Docker daemon changes.

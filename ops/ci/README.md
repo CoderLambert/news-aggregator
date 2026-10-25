@@ -48,11 +48,19 @@ bash ops/ci/manage.sh logs
 bash ops/ci/manage.sh stop
 bash ops/ci/manage.sh start
 bash ops/ci/manage.sh update
+bash ops/ci/manage.sh cache-status
+bash ops/ci/manage.sh warm-cache
+bash ops/ci/manage.sh cache-gc
+bash ops/ci/manage.sh cache-gc --execute
 bash ops/ci/manage.sh uninstall
 ~~~
 
 - doctor 仅检查本机 Docker 和 Compose 配置，不创建容器。
 - install 可重跑，分别检查两个 Runner 的持久身份；如果此前已安装过单 Runner，会保留原后端 Runner 并新增前端 Runner。
+- install、start 和 update 会先用 maintenance 容器预热前后端缓存，全部成功后才启动 Runner listener；预热失败不会让 Runner 上线领取任务。
+- cache-status 只运行安装器的只读状态检查，输出 `CACHE_KIND`、`STATUS`、`KEY` 和 `ROOT`。`HIT` 表示环境完整且校验通过，`PARTIAL` 表示同 key 安装曾开始但尚未完成，`MISSING` 表示该 key 尚无缓存目录。
+- warm-cache 在确认两个 Runner 空闲后暂停 listener，以 `--cache-only` 填充持久卷，不在源码 checkout 创建 `backend/venv` 或 `frontend/node_modules` 链接。
+- cache-gc 默认只预览；只有显式添加 `--execute` 才会持锁删除过期的 64 位十六进制 keyed 目录。它保留 `.current-key`、最近两个成功条目、下载缓存、锁和未知目录，不使用任何全局 prune。
 - stop 只停止 newshub-ci 项目；uninstall 只移除该项目的容器和网络，不删除 Runner 身份、Docker 数据卷，不操作其他 Docker 项目，也不从 GitHub 自动注销 Runner。
 - 永久删除 Runner：在 GitHub 仓库设置中先手动删除两个对应 Runner，确认无需旧缓存后再有针对性地删除明确命名的 newshub-ci 卷。禁止全局 prune。
 - 两个 Runner 的快检或完整任务均可并行；Draft 每次修改**不跑完整测试/构建/G1**，Ready 才对同一 PR 启动完整前后端检查；同一 Runner 仍只能同时处理一个 Job，排队由 GitHub 控制。
@@ -140,7 +148,7 @@ bash ops/ci/manage.sh disable-watch   # 只停用本项目的 user timer，不�
 - `backend/requirements-ci.lock` 锁定 CPython 3.12 / Linux x86_64 的完整解析结果（包含传递依赖），来源为首次成功的真实 CI 安装记录。与生产 `backend/requirements.txt` 分离，不更改生产发布依赖。
 - `ops/ci/check-backend-lock.py` 检查重复/未锁定项目、直接依赖覆盖和缓存环境内 158 个版本。PyTorch CPU 固定版本仍先从官方 CPU Index 安装。
 - `ops/ci/install-backend-deps.sh` 的缓存指纹同时包含 `requirements.txt` 和完整的 CI lock。修改任一文件才会自动重建环境；日常代码提交仍复用已安装依赖。
-- `ops/ci/cache-summary.sh` 在工作流结束时输出后端缓存占用和 DinD BuildKit 占用概要，仅用于诊断；执行超时也不阻断业务检查。
+- `ops/ci/cache-summary.sh` 在工作流结束时输出安装器状态和 DinD BuildKit 占用概要，不遍历或打印缓存内容；执行超时也不阻断业务检查。
 - 首次部署锁文件会出现一次正常 `MISS`（缓存键升级），以后 `HIT`。**不自动清理任何 Docker 镜像或卷，不触碰生产数据**。
 - 依赖升级流程：在隔离环境中明确升级并运行全套检查后，重新生成 `pip freeze`，同步到 CI lock 并审核变更差异；不要自动选择最新的 `>=` 范围版本。
 
@@ -173,19 +181,23 @@ PR #81 自托管 Runner 的一次热缓存验收中，后端 pytest 测试为 24
 | pip 下载缓存 | 持久 PIP_CACHE_DIR | 首次/依赖变化时尽量重用 wheels 和包元数据 |
 | 浏览器 Chromium | 在自定义 Runner 镜像的构建阶段安装 | 后续 CI 直接使用，无需每次 playwright install |
 | Docker build 镜像层 | 独立 DinD 的 docker-data 卷 | 未修改的生产构建层复用；不需要每次完整下载/构建 |
+| Docker BuildKit 下载缓存 | RSS pip、frontend npm、runtime Torch pip 各有独立 `sharing=locked` cache id | 构建步骤失败或上层缓存失效后仍复用已下载 wheel/tarball |
 | Nginx smoke 镜像 | DinD 本地镜像存在 | 检查 image inspect；首次才 docker pull |
 
 首次冷启动或锁文件发生变更仍可能下载依赖。**后端 requirements.txt 中有不少 >= 范围依赖**，相同内容指纹会复用首次解析的已安装版本；需要有意识地升级依赖时，运行 install-backend-deps.sh --refresh 或提高 CI_BACKEND_CACHE_REV，并建议后续补严格 lock 文件以提升可复现性。缓存命中始终进行结构及依赖检查，而不是无条件跳过验证。
 
-缓存不会自动无限清理其他项目；用下面的只读命令查看大小：
+首次部署会产生一次正常冷安装。普通源码 checkout、Runner 重启和失败重试会继续使用相同命名卷；只有依赖指纹、Python/Node ABI 或显式 cache revision 变化才产生新 key。中断的后端环境显示 `PARTIAL`，下次安装会原地 `RESUME` 并复用 pip 下载缓存；前端失败重试会复用 npm integrity 下载缓存。
+
+缓存维护统一使用下面的入口：
 
 ~~~bash
-docker exec newshub-ci-runner-1 du -sh /ci-work/_work/.cache
-docker exec newshub-ci-runner-frontend-1 du -sh /ci-frontend/_work/.cache
-docker exec newshub-ci-docker-1 docker -H unix:///ci-docker/docker.sock system df
+bash ops/ci/manage.sh cache-status
+bash ops/ci/manage.sh warm-cache
+bash ops/ci/manage.sh cache-gc             # 仅预览
+bash ops/ci/manage.sh cache-gc --execute   # 空闲检查、持锁、定向删除
 ~~~
 
-**不要**在 Job 正在运行时删除缓存，不要使用 docker system prune、docker volume prune 或删除 newshub-ci 的状态卷。缓存需要回收时先确认 Runner 空闲，删除指定过期的 keyed cache 目录，并保留当前使用的条目。
+**不要**在 Job 正在运行时删除缓存，不要使用 docker system prune、docker volume prune 或删除 newshub-ci 的状态卷。安装器会优先尊重显式 `PIP_CACHE_DIR` / `npm_config_cache`；未设置时下载缓存仍回退到对应持久 cache root 内，不应改为 checkout 临时目录。
 
 ## 7. 环境和故障
 
