@@ -103,6 +103,25 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertFalse(task.result)
         self.assertFalse(ChatGPTArticleTranslation.objects.exists())
 
+    def test_worker_failure_logs_only_stage_type_and_safe_database_codes(self):
+        task = self.queued()
+        sensitive = 'sk-synthetic-private-key and private source contents'
+        with self.assertLogs('api.services.ai_private_translation', level='WARNING') as captured, \
+                patch.object(service, '_claim', side_effect=RuntimeError(sensitive)), \
+                patch.object(service, 'build_gateway_client') as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'failed')
+        self.assertFalse(task.result)
+        build.assert_not_called()
+        self.assertFalse(ChatGPTArticleTranslation.objects.exists())
+        output = '\n'.join(captured.output)
+        self.assertIn('stage=claim', output)
+        self.assertIn('RuntimeError', output)
+        self.assertNotIn(sensitive, output)
+        self.assertNotIn('sk-synthetic-private-key', output)
+        self.assertNotIn('Traceback', output)
+
     def test_authority_change_before_incomplete_terminal_does_not_preserve_draft(self):
         for mutation in ('credential', 'source'):
             with self.subTest(mutation=mutation):
