@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 export const PROVIDER = 'openai-codex';
 export const MODEL = 'gpt-6-luna';
 export const THINKING = 'xhigh';
-export const TARGET = 'bfe2a6ad9331af0fbc5c7f7a26411079c8608cc1';
 
 export function validateTarget(sha) {
-  if (sha !== TARGET) throw new Error(`Only the accepted main@${TARGET} build is authorized`);
+  if (typeof sha !== 'string' || !/^[0-9a-f]{40}$/.test(sha)) {
+    throw new Error('An exact lowercase 40-hex commit SHA is required');
+  }
   return sha;
 }
 
@@ -60,6 +61,8 @@ export function normalizeDiagnostics(input = {}) {
   const rawPreparationStage = input?.preparationStage;
   return {
     buildCalled: input?.buildCalled === true,
+    reused: input?.reused === true,
+    buildPerformed: input?.buildPerformed === true,
     buildErrorCode: safeDiagnosticCode(input?.buildErrorCode),
     buildExitCode: safeExitCode(input?.buildExitCode),
     buildErrorMessage: sanitizeDiagnosticMessage(input?.buildErrorMessage),
@@ -80,10 +83,19 @@ export function normalizeDiagnostics(input = {}) {
 }
 
 function verifiedBuildResult(result, sha) {
-  return result?.revision === sha && result?.builderImage?.revision === sha &&
-    /^sha256:[0-9a-f]{64}$/.test(result?.builderImage?.id ?? '') &&
-    result?.hostRuntime?.status === 'transfer-required' && result?.hostRuntime?.ready === false &&
-    result?.diagnostics?.imageEvidence?.verified === true;
+  const imageId = result?.builderImage?.id;
+  const identity = result?.revision === sha && result?.builderImage?.revision === sha &&
+    /^sha256:[0-9a-f]{64}$/.test(imageId ?? '') && result?.diagnostics?.imageEvidence?.verified === true;
+  if (!identity) return false;
+  if (result.reused === true && result.buildPerformed === false && result.buildExitCode === null) {
+    return result.hostRuntime?.status === 'ready' && result.hostRuntime?.ready === true &&
+        result.hostRuntime.imageId === imageId && result.builderImage.location === 'host-daemon' ||
+      result.hostRuntime?.status === 'transfer-required' && result.hostRuntime?.ready === false &&
+        result.hostRuntime.imageId === null && result.builderImage.location === 'isolated-ci-dind';
+  }
+  return result.reused === false && result.buildPerformed === true && result.buildExitCode === 0 &&
+    result.hostRuntime?.status === 'transfer-required' && result.hostRuntime?.ready === false &&
+    result.hostRuntime.imageId === null && result.builderImage.location === 'isolated-ci-dind';
 }
 
 // The agent has its own transcript, model and tools. No parent messages or tools

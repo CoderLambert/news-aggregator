@@ -16,6 +16,69 @@ export const CLIENT_USER = '1001:121';
 export const RULES = ['AGENTS.md', 'ops/ci/AGENTS.md', 'scripts/deploy/AGENTS.md',
   'ops/ci/build-release-policy.md', 'Dockerfile', '.dockerignore'];
 
+export const IMAGE_INSPECT_FORMAT = [
+  '{{json .Id}}', '{{json .RepoDigests}}', '{{json .Os}}', '{{json .Architecture}}',
+  '{{json .Config.User}}', '{{json .Config.Cmd}}',
+  '{{json (index .Config.Labels "org.opencontainers.image.revision")}}',
+  '{{range .Config.Env}}{{if or (eq (index (split . "=") 0) "HOME") (eq (index (split . "=") 0) "HF_HOME")}}{{println .}}{{end}}{{end}}',
+] .join('\t');
+const EXPECTED_CMD = ['/app/docker-entrypoint.sh'];
+const EXPECTED_HOME = 'HOME=/root';
+const EXPECTED_HF_HOME = 'HF_HOME=/root/.cache/huggingface';
+
+export function normalizeArchitecture(architecture) {
+  return ({ x86_64: 'amd64', x64: 'amd64', aarch64: 'arm64' })[architecture] ?? architecture;
+}
+
+export function normalizePlatform(value) {
+  const [os, architecture, extra] = String(value ?? '').split('/');
+  if (os !== 'linux' || !architecture || extra) throw blocked('Only a valid linux/native image platform is supported');
+  return `linux/${normalizeArchitecture(architecture)}`;
+}
+
+export function nativePlatform() {
+  const architecture = ({ x64: 'amd64', arm64: 'arm64', arm: 'arm' })[process.arch];
+  if (process.platform !== 'linux' || !architecture) throw blocked('The local builder requires a supported native Linux platform');
+  return `linux/${architecture}`;
+}
+
+export async function validateCommit(root, sha, runCommand) {
+  validateTarget(sha);
+  try {
+    const { stdout } = await runCommand('git', ['cat-file', '-t', sha], root);
+    if (String(stdout).trim() !== 'commit') throw new Error('not a commit object');
+  } catch {
+    throw blocked('The exact SHA is not a commit object available in this repository');
+  }
+  return sha;
+}
+
+export function imageInspectArgs(tag) {
+  if (typeof tag !== 'string' || !/^newshub:dev-[0-9a-f]{40}$/.test(tag)) {
+    throw blocked('Only an exact SHA-tagged local development image may be inspected');
+  }
+  return ['image', 'inspect', '--format', IMAGE_INSPECT_FORMAT, tag];
+}
+
+export function parseImageInspect(stdout) {
+  const fields = String(stdout).replace(/\r?\n$/, '').split('\t');
+  if (fields.length !== 8) throw blocked('Docker returned incomplete allowlisted image metadata');
+  let parsed;
+  try { parsed = fields.slice(0, 7).map(value => JSON.parse(value)); }
+  catch { throw blocked('Docker returned malformed allowlisted image metadata'); }
+  const env = fields[7].split(/\r?\n/).filter(Boolean);
+  if (env.some(value => !/^(?:HOME|HF_HOME)=/.test(value))) {
+    throw blocked('Docker returned non-allowlisted image metadata');
+  }
+  return { Id: parsed[0], RepoDigests: parsed[1], Os: parsed[2], Architecture: parsed[3],
+    Config: { User: parsed[4], Cmd: parsed[5], Labels: { 'org.opencontainers.image.revision': parsed[6] }, Env: env } };
+}
+
+function missingImage(error) {
+  const exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : error?.code;
+  return exitCode === 1 && /(?:No such image|No such object):?\s*(?:newshub:dev-[0-9a-f]{40})?/i.test(error?.stderr ?? '');
+}
+
 export function blocked(message) {
   const error = new Error(message);
   error.code = 'NEWSHUB_BLOCKED';
@@ -86,22 +149,27 @@ export function discoverClientTransport({ dind, runner, frontend, network, socke
 export function clientArgs({ name, taskId, context, command, transport }) {
   if (!/^newshub-image-builder-[0-9a-f-]{36}$/.test(name ?? '') ||
       !/^[0-9a-f-]{36}$/.test(taskId ?? '') || name !== `newshub-image-builder-${taskId}` ||
-      !resolve(context ?? '').startsWith('/') || !Array.isArray(command) ||
+      (context !== null && context !== undefined && typeof context !== 'string') || !Array.isArray(command) ||
       command.some(arg => typeof arg !== 'string' || /[\x00\r\n]/.test(arg)) ||
       transport?.network !== CI_NETWORK || transport?.socketVolume !== SOCKET_VOLUME ||
       transport?.clientImage !== CLIENT_IMAGE ||
       !/^sha256:[0-9a-f]{64}$/.test(transport?.clientImageId ?? '')) {
     throw blocked('Disposable client arguments do not match the isolated CI transport');
   }
-  return ['run', '--pull=never', '--rm', '--name', name,
+  if (context !== null && context !== undefined &&
+      (typeof context !== 'string' || !resolve(context).startsWith('/') || /[\x00\r\n]/.test(context))) {
+    throw blocked('Disposable client context is invalid');
+  }
+  const args = ['run', '--pull=never', '--rm', '--name', name,
     '--label', `com.newshub.pi-image-builder.task=${taskId}`,
     '--network', transport.network, '--user', CLIENT_USER,
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '--env', 'HOME=/tmp', '--env', 'DOCKER_CONFIG=/tmp/.docker',
     '--env', `DOCKER_HOST=unix://${SOCKET}`, '--tmpfs', '/tmp:rw,nosuid,nodev,mode=1777',
-    '--mount', `type=volume,source=${transport.socketVolume},target=/ci-docker,readonly`,
-    '--mount', `type=bind,source=${resolve(context)},target=/context,readonly`,
-    '--workdir', '/context', '--entrypoint', 'docker', transport.clientImageId, ...command];
+    '--mount', `type=volume,source=${transport.socketVolume},target=/ci-docker,readonly`];
+  if (context) args.push('--mount', `type=bind,source=${resolve(context)},target=/context,readonly`);
+  args.push('--workdir', context ? '/context' : '/tmp', '--entrypoint', 'docker', transport.clientImageId, ...command);
+  return args;
 }
 
 // Existing services are not evidence that a CI job is active. Runner.Worker
@@ -124,19 +192,25 @@ export function buildArgs(sha) {
     `org.opencontainers.image.revision=${sha}`, '--tag', `newshub:dev-${sha}`, '/context'];
 }
 
-export function verifyImage(items, sha) {
+export function verifyImage(items, sha, requestedPlatform = nativePlatform()) {
   const image = items?.[0];
+  const expectedPlatform = normalizePlatform(requestedPlatform);
+  const actualPlatform = image ? normalizePlatform(`${image.Os}/${image.Architecture}`) : null;
+  const env = image?.Config?.Env;
+  const home = Array.isArray(env) ? env.filter(value => value.startsWith('HOME=')) : [];
+  const hfHome = Array.isArray(env) ? env.filter(value => value.startsWith('HF_HOME=')) : [];
   if (!image?.Id?.match(/^sha256:[0-9a-f]{64}$/) ||
       image.Config?.Labels?.['org.opencontainers.image.revision'] !== sha ||
       image.Config?.User !== 'root' ||
-      JSON.stringify(image.Config?.Cmd) !== JSON.stringify(['/app/docker-entrypoint.sh']) ||
-      image.Os !== 'linux' || !image.Architecture) {
-    throw blocked('Private builder image metadata does not match the exact source/local-development runtime contract');
+      JSON.stringify(image.Config?.Cmd) !== JSON.stringify(EXPECTED_CMD) ||
+      actualPlatform !== expectedPlatform || home.length !== 1 || home[0] !== EXPECTED_HOME ||
+      hfHome.length !== 1 || hfHome[0] !== EXPECTED_HF_HOME) {
+    throw blocked('Image metadata does not match the exact source/native local-development runtime contract');
   }
   return {
     builderImage: { location: 'isolated-ci-dind', reference: `newshub:dev-${sha}`,
       id: image.Id, digests: image.RepoDigests ?? [],
-      platform: `${image.Os}/${image.Architecture}`, revision: sha, user: image.Config.User },
+      platform: actualPlatform, revision: sha, user: image.Config.User },
     hostRuntime: { status: 'transfer-required', ready: false, imageId: null },
     revision: sha,
   };
@@ -157,19 +231,34 @@ export async function acquireLock(path) {
   };
 }
 
-export function createBuild(root, signal) {
+export function createCommandRunner({ root, signal, env, execFileImpl = exec }) {
+  return (bin, args, cwd = root, options = {}) => {
+    const { env: extraEnv = {}, ...execOptions } = options;
+    return execFileImpl(bin, args, {
+      cwd, env: { ...env, ...extraEnv },
+      timeout: execOptions.timeout ?? 30_000,
+      maxBuffer: execOptions.maxBuffer ?? 32 * 1024 * 1024,
+      signal: Object.hasOwn(execOptions, 'signal') ? execOptions.signal : signal,
+    });
+  };
+}
+
+export function createBuild(root, signal, options = {}) {
   // Docker overrides/config/auth are intentionally not inherited by host orchestration.
   const env = { PATH: process.env.PATH, HOME: '/nonexistent', DOCKER_CONFIG: '/nonexistent/.docker',
     LANG: 'C.UTF-8', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' };
-  const run = (bin, args, cwd = root, extra = {}) => exec(bin, args, {
-    cwd, env: { ...env, ...extra }, timeout: 30_000, maxBuffer: 32 * 1024 * 1024, signal,
-  });
+  const commandRunner = options.runCommand ?? createCommandRunner({ root, signal, env,
+    execFileImpl: options.execFileImpl ?? exec });
+  const run = (bin, args, cwd = root, extra = {}) => commandRunner(bin, args, cwd, extra);
+  const spawnRunner = options.spawnCommand ?? ((bin, args, config) => spawn(bin, args, config));
+  const requestedPlatform = options.requestedPlatform ?? nativePlatform();
   const git = async (...args) => (await run('git', args)).stdout;
   let used = false;
   let evidence;
   return {
+    validateSource: sha => validateCommit(root, sha, run),
     rules: async sha => {
-      validateTarget(sha);
+      await validateCommit(root, sha, run);
       const documents = [];
       for (const path of RULES) documents.push(`# ${path}\n${await git('show', `${sha}:${path}`)}`);
       return documents.join('\n\n');
@@ -179,22 +268,27 @@ export function createBuild(root, signal) {
       validateTarget(sha);
       if (used) throw blocked('One build attempt per job; retries require a new explicit request');
       used = true;
+      await validateCommit(root, sha, run);
+      const tag = `newshub:dev-${sha}`;
       try {
-        await run('git', ['merge-base', '--is-ancestor', sha, 'refs/heads/main']);
-      } catch {
-        throw blocked('The accepted source SHA is not present in local main history');
+        const inspected = await run('docker', imageInspectArgs(tag));
+        const image = parseImageInspect(inspected.stdout);
+        const verified = verifyImage([image], sha, requestedPlatform);
+        evidence = { ...verified, builderImage: { ...verified.builderImage,
+          location: 'host-daemon', reference: tag },
+          hostRuntime: { status: 'ready', ready: true, imageId: verified.builderImage.id },
+          reused: true, buildPerformed: false, buildExitCode: null, exitCode: null,
+          note: 'Verified existing host image reused; no CI transport, source export, client, or build was used.' };
+        return evidence;
+      } catch (error) {
+        if (error?.code === 'NEWSHUB_BLOCKED' || !missingImage(error)) {
+          throw error?.code === 'NEWSHUB_BLOCKED' ? error : blocked('Host Docker image inspection failed; daemon access is unavailable');
+        }
       }
       const common = resolve(root, (await git('rev-parse', '--git-common-dir')).trim());
       const release = await acquireLock(join(common, 'newshub-pi-image-builder.lock'));
       let safeToReleaseLock = true;
       try {
-        // No process arguments are returned to the model or logs.
-        const processes = (await run('ps', ['-eo', 'comm=,args='])).stdout;
-        if (processes.split('\n').some(line => /^(?:omp|docker|buildctl|buildkitd|buildx)\s/.test(line.trim()) ||
-            /^(?:node|bun)\s+\S*\/(?:omp|oh-my-pi)(?:\/|\s|$)/.test(line.trim()))) {
-          throw blocked('A prior OMP/build process may still be active; resolve it before building');
-        }
-
         const fields = async (args, count) => {
           const output = (await run('docker', args)).stdout.replace(/\r?\n$/, '').split('\t');
           if (output.length !== count) throw blocked('Docker returned incomplete metadata for isolated-builder discovery');
@@ -233,6 +327,54 @@ export function createBuild(root, signal) {
           Os: JSON.parse(clientOs), Architecture: JSON.parse(clientArchitecture) };
         const transport = discoverClientTransport({ dind, runner, frontend, network, socketVolume, clientImage });
 
+        const taskId = randomUUID();
+        const clientName = `newshub-image-builder-${taskId}`;
+        const cleanupRun = (args) => run('docker', args, root, {
+          timeout: 5_000, maxBuffer: 1024 * 1024, signal: AbortSignal.timeout(5_000),
+        });
+        const privateClient = async command => {
+          try {
+            await run('docker', ['container', 'inspect', '--format', '{{.Id}}', clientName]);
+            throw blocked('Task-unique Docker client name already exists; it was left untouched');
+          } catch (error) {
+            if (error?.code === 'NEWSHUB_BLOCKED') throw error;
+            if (error?.code !== 1 || !/No such object|No such container/i.test(error?.stderr ?? '')) throw error;
+          }
+          try {
+            return await run('docker', clientArgs({ name: clientName, taskId, context: null,
+              command, transport }));
+          } finally {
+            try {
+              const { stdout } = await cleanupRun(['container', 'inspect', '--format', '{{json (index .Config.Labels "com.newshub.pi-image-builder.task")}}', clientName]);
+              if (JSON.parse(stdout.trim()) === taskId) await cleanupRun(['container', 'rm', '--force', clientName]);
+              else throw blocked('Disposable client ownership changed; resource was left untouched');
+            } catch (error) {
+              const missing = error?.code === 1 && /No such object|No such container|not found/i.test(error?.stderr ?? '');
+              if (!missing) {
+                safeToReleaseLock = false;
+                throw blocked('Could not verify/clean only the task-owned disposable client; its lock is preserved and no successful result is reported');
+              }
+            }
+          }
+        };
+        try {
+          const inspected = await privateClient(imageInspectArgs(tag));
+          const image = parseImageInspect(inspected.stdout);
+          const verified = verifyImage([image], sha, requestedPlatform);
+          evidence = { ...verified, reused: true, buildPerformed: false, buildExitCode: null, exitCode: null,
+            note: 'Verified existing isolated DinD image reused; no source export or build was performed. Host transfer is required and has not occurred.' };
+          return evidence;
+        } catch (error) {
+          if (error?.code === 'NEWSHUB_BLOCKED' || !missingImage(error)) throw error;
+        }
+
+        // Fresh builds alone require idle Runner.Worker checks and process fencing.
+        // Existing daemon/Redis containers are preserved and are not a busy signal.
+        const processes = (await run('ps', ['-eo', 'comm=,args='])).stdout;
+        if (processes.split('\n').some(line => /^(?:omp|docker|buildctl|buildkitd|buildx)\s/.test(line.trim()) ||
+            /^(?:node|bun)\s+\S*\/(?:omp|oh-my-pi)(?:\/|\s|$)/.test(line.trim()))) {
+          throw blocked('A prior OMP/build process may still be active; resolve it before building');
+        }
         for (const name of ['newshub-ci-runner-1', 'newshub-ci-runner-frontend-1']) {
           const { stdout } = await run('docker', ['top', name, '-eo', 'pid,comm']);
           const lines = stdout.trim().split(/\r?\n/);
@@ -273,12 +415,6 @@ export function createBuild(root, signal) {
         // The client is UID 1001/GID 121; expose only this sanitized root, not its parent.
         await chmod(context, 0o755);
 
-        const taskId = randomUUID();
-        const clientName = `newshub-image-builder-${taskId}`;
-        const cleanupRun = (args) => exec('docker', args, {
-          cwd: root, env, timeout: 5_000, maxBuffer: 1024 * 1024,
-          signal: AbortSignal.timeout(5_000),
-        });
         const client = async (command, stream = false) => {
           // Refuse collisions, and cleanup only a container carrying this task's label.
           try {
@@ -293,7 +429,7 @@ export function createBuild(root, signal) {
           try {
             if (!stream) return await run('docker', args, context);
             return await new Promise(resolveCode => {
-              const child = spawn('docker', args, { cwd: context, env, signal,
+              const child = spawnRunner('docker', args, { cwd: context, env, signal,
                 stdio: ['ignore', 'pipe', 'pipe'] });
               let pending = '';
               const feed = chunk => {
@@ -332,7 +468,6 @@ export function createBuild(root, signal) {
 
         const preservedBuilderContainers = preservedContainerNames(
           (await client(['ps', '--format', '{{.Names}}'])).stdout, clientName);
-        const tag = `newshub:dev-${sha}`;
         if ((await client(['image', 'ls', '-q', tag])).stdout.trim()) {
           throw blocked('Exact target tag already exists; inspect it rather than overwrite it');
         }
@@ -340,16 +475,12 @@ export function createBuild(root, signal) {
         const cache = { cachedMarkers: 0, executedMarkers: 0 };
         const buildResult = await client(buildArgs(sha), true);
         if (buildResult.code !== 0) throw blocked(`Docker build failed (exit ${buildResult.code}); no retry performed`);
-        const imageFormat = '{{json .Id}}\t{{json .RepoDigests}}\t{{json .Os}}\t{{json .Architecture}}\t{{json .Config.User}}\t{{json .Config.Cmd}}\t{{json (index .Config.Labels "org.opencontainers.image.revision")}}';
-        const inspected = await client(['image', 'inspect', '--format', imageFormat, tag]);
-        const imageFields = inspected.stdout.replace(/\r?\n$/, '').split('\t');
-        if (imageFields.length !== 7) throw blocked('Docker returned incomplete private-image verification metadata');
-        const [id, digests, targetOs, targetArchitecture, user, cmd, revision] = imageFields.map(value => JSON.parse(value));
-        const image = { Id: id, RepoDigests: digests, Os: targetOs, Architecture: targetArchitecture,
-          Config: { User: user, Cmd: cmd, Labels: { 'org.opencontainers.image.revision': revision } } };
-        evidence = { ...verifyImage([image], sha), exitCode: buildResult.code,
+        const inspected = await client(imageInspectArgs(tag));
+        const image = parseImageInspect(inspected.stdout);
+        evidence = { ...verifyImage([image], sha, requestedPlatform), reused: false,
+          buildPerformed: true, buildExitCode: buildResult.code, exitCode: buildResult.code,
           command: ['docker', 'run', '--pull=never', '--entrypoint', 'docker', transport.clientImageId, ...buildArgs(sha)],
-          cache, context, preservedBuilderContainers, note: 'Private builder image verified in isolated DinD. Disposable client containers were run; no application containers were started. Host runtime transfer is required and has not occurred.' };
+          cache, context, preservedBuilderContainers, note: 'Private builder image built and verified in isolated DinD. Disposable client containers were run; no application containers were started. Host runtime transfer is required and has not occurred.' };
         return evidence;
       } finally {
         if (safeToReleaseLock) await release();

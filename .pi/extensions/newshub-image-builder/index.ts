@@ -20,6 +20,9 @@ export default function (pi: ExtensionAPI) {
     root,
   });
   const jobs = new BuildJobs(worker);
+  const localSha = process.env.NEWSHUB_LOCAL_IMAGE_BUILD_SHA;
+  if (localSha !== undefined) validateTarget(localSha);
+  let localStartUsed = false;
 
   pi.registerTool({
     name: 'newshub_image_builder', label: 'NewsHub Luna image builder',
@@ -36,8 +39,15 @@ export default function (pi: ExtensionAPI) {
       if (await realpath(ctx.cwd) !== await realpath(root)) throw blocked('Run this project extension from the repository root');
       registry = ctx.modelRegistry;
       let result;
-      if (params.action === 'start') result = jobs.start(params.sha, params.authorized);
-      else if (params.action === 'status') result = jobs.status(params.jobId);
+      if (params.action === 'start') {
+        if (localSha !== undefined) {
+          if (params.sha !== localSha) throw blocked('This native local build is bound to its requested commit SHA');
+          if (localStartUsed) throw blocked('This native local build permits one start only');
+          if (params.authorized !== true) throw blocked('Explicit build-only authorization is required');
+          localStartUsed = true;
+        }
+        result = jobs.start(params.sha, params.authorized);
+      } else if (params.action === 'status') result = jobs.status(params.jobId);
       else {
         if (!params.jobId) throw new Error('wait requires jobId');
         result = await jobs.wait(params.jobId, params.waitSeconds, signal);

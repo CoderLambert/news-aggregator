@@ -1,14 +1,127 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, mkdir, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BuildJobs, TARGET, PROVIDER, MODEL, THINKING, validateTarget, normalizeDiagnostics,
+import { execFileSync, spawnSync, spawn } from 'node:child_process';
+import { BuildJobs, PROVIDER, MODEL, THINKING, validateTarget, normalizeDiagnostics,
   sanitizeDiagnosticMessage } from '../core.mjs';
 import { createImageBuildWorker, classifyChildError } from '../worker.mjs';
 import * as buildModule from '../build.mjs';
 import { safeRuntimePath, buildArgs, verifyImage, acquireLock, blocked, SOCKET,
-  CI_NETWORK, SOCKET_VOLUME, CLIENT_IMAGE, CLIENT_USER, discoverClientTransport, clientArgs } from '../build.mjs';
+  CI_NETWORK, SOCKET_VOLUME, CLIENT_IMAGE, CLIENT_USER, discoverClientTransport, clientArgs,
+  validateCommit, createBuild, normalizePlatform, parseImageInspect,
+  createCommandRunner, imageInspectArgs, IMAGE_INSPECT_FORMAT } from '../build.mjs';
+import { dockerHarness, imageOutput } from './fakes.mjs';
+import { resolvePiExecutable } from '../cli.mjs';
+
+const ROOT = new URL('../../../../', import.meta.url).pathname;
+const WRAPPER = `${ROOT}/scripts/local-image-build`;
+const NODE22_PATH = '/home/lambert/.local/share/mise/installs/node/22.23.3/bin';
+
+async function fakePi(t) {
+  const dir = await mkdtemp(join(tmpdir(), 'newshub-fake-pi-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const executable = join(dir, 'pi');
+  const source = `#!/usr/bin/env node
+const fs = require('node:fs');
+fs.writeFileSync(process.env.FAKE_ARGS_FILE, JSON.stringify({ args: process.argv.slice(2),
+  inheritedPiDir: process.env.PI_CODING_AGENT_DIR, boundSha: process.env.NEWSHUB_LOCAL_IMAGE_BUILD_SHA }));
+const mode = process.env.FAKE_MODE || 'success';
+if (mode === 'signal') {
+  fs.writeFileSync(process.env.FAKE_STARTED_FILE, 'started');
+  process.on('SIGTERM', () => { fs.writeFileSync(process.env.FAKE_SIGNAL_FILE, 'SIGTERM'); process.exit(0); });
+  setInterval(() => {}, 1000);
+} else if (mode === 'malformed') {
+  process.stdout.write('{bad json\\n');
+} else if (mode === 'unauthorized-hang') {
+  process.stdout.write(JSON.stringify({ type: 'session', version: 3 }) + '\\n' +
+    JSON.stringify({ type: 'tool_execution_start', toolCallId: 'bad', toolName: 'newshub_image_builder',
+      args: { action: 'start', sha: 'b'.repeat(40), authorized: true } }) + '\\n');
+  setInterval(() => {}, 1000);
+} else {
+  const sha = process.env.FAKE_SHA;
+  const jobId = 'job-fixed-1';
+  const identity = { provider: 'openai-codex', model: 'gpt-6-luna', thinking: 'xhigh' };
+  const startSha = mode === 'sha-mismatch' ? 'b'.repeat(40) : sha;
+  const receiptSha = mode === 'receipt-sha-mismatch' ? 'b'.repeat(40) : sha;
+  const receiptModel = mode === 'receipt-model-mismatch' ? 'gpt-6-wrong' : identity.model;
+  const receipt = (status, id = jobId) => ({ id, sha: receiptSha, provider: identity.provider,
+    model: receiptModel, thinking: identity.thinking, status,
+    ...(status === 'succeeded' ? { result: { revision: sha,
+      builderImage: { id: 'sha256:' + 'c'.repeat(64), revision: sha, location: 'host-daemon', platform: 'linux/amd64', user: 'root' },
+      hostRuntime: { status: 'ready', ready: true, imageId: 'sha256:' + 'c'.repeat(64) },
+      reused: true, buildPerformed: false, buildExitCode: null },
+      diagnostics: { imageEvidence: { verified: mode !== 'evidence-missing' } } } : {
+      error: 'provider payload api_key=raw-secret', diagnostics: mode === 'build-failed' ? {
+        buildErrorCode: 'DOCKER_BUILD_FAILED', buildExitCode: 17,
+        buildErrorMessage: 'Docker build failed (exit 17); no retry performed',
+      } : { childErrorMessage: 'provider payload api_key=raw-secret' } }) });
+  const events = [{ type: 'session', version: 3 },
+    { type: 'message_end', message: { role: 'assistant', provider: identity.provider,
+      model: mode === 'model-mismatch' ? 'gpt-6-wrong' : identity.model,
+      thinkingLevel: 'xhigh', stopReason: 'stop', content: [{ type: 'text', text: 'Finished.' }] } }];
+  if (mode !== 'missing' && mode !== 'assistant-text') {
+    events.push({ type: 'tool_execution_start', toolCallId: 'start-1', toolName: 'newshub_image_builder',
+      args: { action: 'start', sha: startSha, authorized: true } });
+    events.push({ type: 'tool_execution_end', toolCallId: 'start-1', toolName: 'newshub_image_builder', isError: false,
+      result: { details: receipt('running') } });
+    events.push({ type: 'tool_execution_start', toolCallId: 'wait-1', toolName: 'newshub_image_builder',
+      args: { action: 'wait', jobId: mode === 'job-mismatch' ? 'job-other' : jobId, waitSeconds: 30 } });
+    const terminalReceipt = receipt(['failed', 'build-failed'].includes(mode) ? 'failed' : 'succeeded',
+      mode === 'receipt-job-mismatch' ? 'job-other' : jobId);
+    if (mode === 'content-receipt') {
+      events.push({ type: 'turn_end', toolResults: [{ toolCallId: 'wait-1', toolName: 'newshub_image_builder',
+        content: [{ type: 'text', text: JSON.stringify(terminalReceipt) }] }] });
+    } else {
+      events.push({ type: 'tool_execution_end', toolCallId: 'wait-1', toolName: 'newshub_image_builder', isError: false,
+        result: { details: terminalReceipt } });
+    }
+  }
+  if (mode !== 'unsettled') events.push({ type: 'agent_settled', aborted: false });
+  process.stdout.write(events.map(event => JSON.stringify(event)).join('\\n') + '\\n');
+  if (mode === 'nonzero') process.exitCode = 7;
+}
+`;
+  await writeFile(executable, source);
+  await chmod(executable, 0o755);
+  return executable;
+}
+
+function invokeLocalCli(sha, executable, mode = 'success', extra = {}) {
+  const argsFile = extra.argsFile ?? `${executable}.args.json`;
+  const env = { ...process.env, PATH: `${NODE22_PATH}:${process.env.PATH}`,
+    NEWSHUB_PI_BIN: executable, FAKE_SHA: sha, FAKE_MODE: mode, FAKE_ARGS_FILE: argsFile,
+    ...(extra.env ?? {}) };
+  const result = spawnSync(WRAPPER, ['--sha', sha, '--execute'], { cwd: ROOT, env,
+    encoding: 'utf8', timeout: 10_000, maxBuffer: 2 * 1024 * 1024 });
+  return { ...result, argsFile };
+}
+
+const TARGET = 'a'.repeat(40); // Synthetic SHA fixture; production requires a real repository commit.
+
+async function syntheticRepo(t) {
+  const root = await mkdtemp(join(tmpdir(), 'newshub-builder-git-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8',
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' } }).trim();
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.name', 'Offline Test');
+  git('config', 'user.email', 'offline@example.invalid');
+  await mkdir(join(root, 'backend'), { recursive: true });
+  await writeFile(join(root, 'Dockerfile'), 'FROM scratch\n');
+  await writeFile(join(root, '.dockerignore'), '**/.env\n**/*.sqlite3\n**/*.sqlite3-wal\n**/*.sqlite3-shm\n.pi/\n');
+  await writeFile(join(root, 'backend/app.py'), 'SOURCE=committed\n');
+  git('add', 'Dockerfile', '.dockerignore', 'backend/app.py');
+  git('commit', '-qm', 'synthetic base');
+  const baseSha = git('rev-parse', 'HEAD');
+  git('switch', '-qc', 'feature');
+  await writeFile(join(root, 'backend/app.py'), 'SOURCE=feature\n');
+  git('add', 'backend/app.py');
+  git('commit', '-qm', 'synthetic feature');
+  const featureSha = git('rev-parse', 'HEAD');
+  return { root, baseSha, featureSha, git };
+}
 
 test('existing builder services are preserved, not mistaken for busy workers', () => {
   assert.equal(typeof buildModule.preservedContainerNames, 'function');
@@ -18,12 +131,42 @@ test('existing builder services are preserved, not mistaken for busy workers', (
   assert.throws(() => buildModule.preservedContainerNames('invalid;command\n', 'own-client'));
 });
 
+test('Docker inspect argument projects only allowlisted HOME/HF_HOME metadata', () => {
+  const args = imageInspectArgs(`newshub:dev-${TARGET}`);
+  assert.deepEqual(args.slice(0, 3), ['image', 'inspect', '--format']);
+  assert.ok(args[3].includes('split . "="'));
+  assert.ok(args[3].includes('"HOME"'));
+  assert.ok(args[3].includes('"HF_HOME"'));
+  assert.equal(args[3].includes('hasPrefix'), false);
+  assert.equal(args[3].includes('{{json .Config.Env}}'), false);
+  assert.ok(IMAGE_INSPECT_FORMAT.includes('org.opencontainers.image.revision'));
+  assert.throws(() => imageInspectArgs('newshub:latest'));
+});
+
+test('cleanup command options use their own bounded signal, never the aborted job signal', async () => {
+  const job = new AbortController();
+  job.abort();
+  const cleanup = new AbortController();
+  const captured = {};
+  const run = createCommandRunner({ root: '/synthetic', signal: job.signal, env: { PATH: '/safe' },
+    execFileImpl: async (_bin, _args, options) => { Object.assign(captured, options); return { stdout: '' }; } });
+  await run('docker', ['container', 'inspect'], '/synthetic', {
+    timeout: 5_000, maxBuffer: 1024, signal: cleanup.signal,
+  });
+  assert.equal(captured.signal, cleanup.signal);
+  assert.equal(captured.signal.aborted, false);
+  assert.equal(captured.timeout, 5_000);
+  assert.equal(captured.maxBuffer, 1024);
+  assert.deepEqual(captured.env, { PATH: '/safe' });
+});
+
 test('local image follows the accepted development user and cache contract', () => {
   assert.deepEqual(buildArgs(TARGET), ['build', '--progress=plain', '--target', 'development',
     '--label', `org.opencontainers.image.revision=${TARGET}`, '--tag', `newshub:dev-${TARGET}`, '/context']);
   const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64',
-    Config: { User: 'root', Cmd: ['/app/docker-entrypoint.sh'],
-      Labels: { 'org.opencontainers.image.revision': TARGET } } };
+    Config: { User: 'root', Cmd: ['/app/docker-entrypoint.sh'], Env: [
+      'HOME=/root', 'HF_HOME=/root/.cache/huggingface',
+    ], Labels: { 'org.opencontainers.image.revision': TARGET } } };
   assert.equal(verifyImage([image], TARGET).builderImage.user, 'root');
 });
 
@@ -51,8 +194,9 @@ function transportFixture() {
 
 const verifiedResult = {
   revision: TARGET,
-  builderImage: { id: `sha256:${'a'.repeat(64)}`, revision: TARGET },
+  builderImage: { id: `sha256:${'a'.repeat(64)}`, revision: TARGET, location: 'isolated-ci-dind' },
   hostRuntime: { status: 'transfer-required', ready: false, imageId: null },
+  reused: true, buildPerformed: false, buildExitCode: null,
   diagnostics: { imageEvidence: { verified: true } },
 };
 
@@ -120,6 +264,7 @@ function workerFixture(behavior, failBuild = false, deadlineMs = 1000, missingEv
         throw Object.assign(new Error('private adapter payload'), { code: 'EACCES', exitCode: 13 });
       }
       return {
+      validateSource: async () => {},
       rules: async () => {
         if (prepareFailure === 'rules') {
           throw Object.assign(new Error('private rules payload'), { code: 'EACCES', exitCode: 13 });
@@ -142,13 +287,146 @@ function workerFixture(behavior, failBuild = false, deadlineMs = 1000, missingEv
   return { worker, buildCalls: () => buildCalls };
 }
 
-test('exact model and accepted SHA only; malformed or moving targets rejected', () => {
-  assert.equal(`${PROVIDER}/${MODEL}`, 'openai-codex/gpt-6-luna');
-  assert.equal(THINKING, 'xhigh');
-  assert.equal(validateTarget(TARGET), TARGET);
-  for (const sha of [undefined, '', 'main', TARGET.slice(0, 8), 'f'.repeat(40), `${TARGET}; docker push x`]) {
+test('accepts another explicit exact lowercase SHA without pinning it to main', () => {
+  const otherSha = 'c'.repeat(40);
+  assert.equal(validateTarget(otherSha), otherSha);
+});
+
+test('image reuse rejects mismatched native platform and HOME/HF_HOME cache contract', () => {
+  const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64',
+    Config: { User: 'root', Cmd: ['/app/docker-entrypoint.sh'], Env: [
+      'HOME=/root', 'HF_HOME=/root/.cache/huggingface', 'API_KEY=must-not-be-inspected',
+    ], Labels: { 'org.opencontainers.image.revision': TARGET } } };
+  assert.doesNotThrow(() => verifyImage([image], TARGET, 'linux/x86_64'));
+  for (const mutate of [
+    value => { value.Architecture = 'arm64'; },
+    value => { value.Config.Env[0] = 'HOME=/tmp'; },
+    value => { value.Config.Env[1] = 'HF_HOME=/cache'; },
+  ]) {
+    const mismatched = structuredClone(image);
+    mutate(mismatched);
+    assert.throws(() => verifyImage([mismatched], TARGET, 'linux/amd64'));
+  }
+});
+
+test('exact SHA syntax rejects omitted, abbreviated, ref, uppercase, and expression inputs', () => {
+  for (const sha of [undefined, '', 'main', TARGET.slice(0, 8), 'A'.repeat(40), `${TARGET}; docker push x`]) {
     assert.throws(() => validateTarget(sha));
   }
+});
+
+test('repository proof accepts a feature commit and rejects tag, blob, unknown, and ref inputs', async t => {
+  const repo = await syntheticRepo(t);
+  const build = createBuild(repo.root, new AbortController().signal);
+  assert.equal(await build.validateSource(repo.featureSha), repo.featureSha);
+  repo.git('tag', '-a', 'feature-tag', '-m', 'annotated');
+  const tagObject = repo.git('rev-parse', 'refs/tags/feature-tag');
+  const blob = repo.git('rev-parse', `${repo.featureSha}:backend/app.py`);
+  await assert.rejects(build.validateSource(tagObject), /not a commit object/);
+  await assert.rejects(build.validateSource(blob), /not a commit object/);
+  await assert.rejects(build.validateSource('f'.repeat(40)), /not a commit object/);
+  await assert.rejects(build.validateSource('feature'), /lowercase 40-hex/);
+});
+
+test('verified host image reuse needs only a fake host inspect and returns matching ready image ID', async t => {
+  const repo = await syntheticRepo(t);
+  const commands = [];
+  const runner = async (bin, args, cwd) => {
+    commands.push([bin, args]);
+    if (bin === 'git') return { stdout: execFileSync(bin, args, { cwd, encoding: 'utf8' }) };
+    assert.deepEqual(args.slice(0, 3), ['image', 'inspect', '--format']);
+    return { stdout: imageOutput({ revision: repo.featureSha, architecture: 'x86_64' }) };
+  };
+  const build = createBuild(repo.root, new AbortController().signal, {
+    runCommand: runner, requestedPlatform: 'linux/x86_64',
+  });
+  const result = await build.build(repo.featureSha);
+  assert.equal(result.reused, true);
+  assert.equal(result.buildPerformed, false);
+  assert.equal(result.buildExitCode, null);
+  assert.equal(result.hostRuntime.status, 'ready');
+  assert.equal(result.hostRuntime.imageId, result.builderImage.id);
+  assert.equal(result.builderImage.location, 'host-daemon');
+  assert.equal(result.builderImage.platform, 'linux/amd64');
+  assert.deepEqual(commands.filter(([bin]) => bin === 'docker').map(([, args]) => args.slice(0, 2)), [['image', 'inspect']]);
+  assert.equal(commands.some(([bin, args]) => bin === 'ps' || args.includes('ls-tree')), false);
+});
+
+test('conflicting host metadata and daemon access failures fail closed without DinD fallback', async t => {
+  const repo = await syntheticRepo(t);
+  for (const [name, failure] of [
+    ['revision', imageOutput({ revision: repo.baseSha })],
+    ['platform', imageOutput({ revision: repo.featureSha, architecture: 'arm64' })],
+    ['user', imageOutput({ revision: repo.featureSha, user: '10001:10001' })],
+    ['command', imageOutput({ revision: repo.featureSha, cmd: ['sh'] })],
+    ['cache', imageOutput({ revision: repo.featureSha, env: ['HOME=/root', 'HF_HOME=/cache'] })],
+    ['daemon', Object.assign(new Error('private daemon diagnostic'), { code: 1, stderr: 'Cannot connect to the Docker daemon' })],
+  ]) {
+    const calls = [];
+    const runner = async (bin, args, cwd) => {
+      calls.push([bin, args]);
+      if (bin === 'git') return { stdout: execFileSync(bin, args, { cwd, encoding: 'utf8' }) };
+      if (name === 'daemon') throw failure;
+      return { stdout: failure };
+    };
+    const build = createBuild(repo.root, new AbortController().signal, { runCommand: runner,
+      requestedPlatform: 'linux/amd64' });
+    await assert.rejects(build.build(repo.featureSha), /Image metadata|daemon access/);
+    assert.equal(calls.filter(([bin]) => bin === 'docker').length, 1, name);
+  }
+});
+
+test('private DinD image reuse skips source export/build and does not require idle Runner.Worker', async t => {
+  const repo = await syntheticRepo(t);
+  const fake = dockerHarness(repo, { privateImage: 'verified', activeWorker: true });
+  const build = createBuild(repo.root, new AbortController().signal, { ...fake, requestedPlatform: 'linux/amd64' });
+  const result = await build.build(repo.featureSha);
+  assert.equal(result.reused, true);
+  assert.equal(result.buildPerformed, false);
+  assert.equal(result.buildExitCode, null);
+  assert.equal(result.hostRuntime.status, 'transfer-required');
+  assert.equal(result.builderImage.location, 'isolated-ci-dind');
+  assert.equal(fake.calls.some(args => args[0] === 'top'), false);
+  assert.equal(fake.calls.some(args => args[0] === 'build'), false);
+  assert.equal(fake.gitCalls.some(args => args.includes('ls-tree')), false);
+});
+
+test('private cache conflicts and daemon failures never fall through to a fresh build', async t => {
+  const repo = await syntheticRepo(t);
+  for (const privateImage of [
+    { revision: repo.baseSha }, { architecture: 'arm64' }, { user: '10001:10001' },
+    { cmd: ['sh'] }, { env: ['HOME=/root', 'HF_HOME=/cache'] }, 'daemon',
+  ]) {
+    const fake = dockerHarness(repo, { privateImage });
+    const build = createBuild(repo.root, new AbortController().signal, { ...fake, requestedPlatform: 'linux/amd64' });
+    await assert.rejects(build.build(repo.featureSha), /Image metadata|daemon/);
+    assert.equal(fake.calls.some(args => args.includes('build')), false);
+  }
+});
+
+test('missing host/private tags choose one isolated development build after Runner.Worker checks', async t => {
+  const repo = await syntheticRepo(t);
+  const fake = dockerHarness(repo, { privateImage: 'missing' });
+  const build = createBuild(repo.root, new AbortController().signal, { ...fake, requestedPlatform: 'linux/amd64' });
+  const result = await build.build(repo.featureSha);
+  assert.equal(result.reused, false);
+  assert.equal(result.buildPerformed, true);
+  assert.equal(result.buildExitCode, 0);
+  assert.deepEqual(result.preservedBuilderContainers, ['redis-container']);
+  assert.equal(fake.calls.some(args => args[0] === 'top'), true);
+  assert.equal(fake.gitCalls.some(args => args.includes('ls-tree')), true);
+  assert.equal(result.command.includes('--target'), true);
+  assert.equal(result.command[result.command.indexOf('--target') + 1], 'development');
+  assert.equal(result.note.includes('transfer is required'), true);
+});
+
+test('busy Runner.Worker blocks fresh build before immutable source export or build', async t => {
+  const repo = await syntheticRepo(t);
+  const fake = dockerHarness(repo, { privateImage: 'missing', activeWorker: true });
+  const build = createBuild(repo.root, new AbortController().signal, { ...fake, requestedPlatform: 'linux/amd64' });
+  await assert.rejects(build.build(repo.featureSha), /Runner.Worker is active/);
+  assert.equal(fake.calls.some(args => args[0] === 'top'), true);
+  assert.equal(fake.calls.some(args => args.includes('build')), false);
 });
 
 test('factory and status are inert; authorization is explicit', () => {
@@ -171,6 +449,30 @@ test('start, query and wait preserve identity and reject concurrent duplicate jo
   assert.equal(result.status, 'succeeded');
   assert.equal(result.result.revision, TARGET);
   assert.throws(() => jobs.status('missing'), /Unknown job/);
+});
+
+test('BuildJobs accepts only verified host-ready reuse, private-transfer reuse, or real completed build states', async () => {
+  const hostId = `sha256:${'e'.repeat(64)}`;
+  const hostResult = { ...verifiedResult, builderImage: { ...verifiedResult.builderImage,
+    id: hostId, location: 'host-daemon' }, hostRuntime: { status: 'ready', ready: true, imageId: hostId } };
+  const builtResult = { ...verifiedResult, reused: false, buildPerformed: true, buildExitCode: 0 };
+  for (const result of [hostResult, verifiedResult, builtResult]) {
+    const jobs = new BuildJobs(async () => result);
+    const started = jobs.start(TARGET, true);
+    assert.equal((await jobs.wait(started.id, 1)).status, 'succeeded');
+  }
+  for (const result of [
+    { ...verifiedResult, buildPerformed: false, buildExitCode: 0 },
+    { ...verifiedResult, reused: false, buildPerformed: true, buildExitCode: null },
+    { ...hostResult, hostRuntime: { status: 'ready', ready: true, imageId: 'sha256:wrong' } },
+  ]) {
+    const jobs = new BuildJobs(async () => result);
+    const started = jobs.start(TARGET, true);
+    const refused = await jobs.wait(started.id, 1);
+    assert.equal(refused.status, 'blocked');
+    assert.equal(refused.result, undefined);
+    assert.equal(refused.diagnostics.imageEvidence.verified, false);
+  }
 });
 
 test('build and child failure diagnostics survive query/wait without leaking unsafe text', async () => {
@@ -399,6 +701,7 @@ test('regression: private-volume client replaces the old host-socket assumption'
 test('tag alone, wrong revision, mismatched local user and wrong entrypoint are not success', () => {
   const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64',
     Config: { User: 'root', Cmd: ['/app/docker-entrypoint.sh'],
+      Env: ['HOME=/root', 'HF_HOME=/root/.cache/huggingface'],
       Labels: { 'org.opencontainers.image.revision': TARGET } } };
   const result = verifyImage([image], TARGET);
   assert.equal(result.revision, TARGET);
@@ -411,6 +714,112 @@ test('tag alone, wrong revision, mismatched local user and wrong entrypoint are 
     { ...image, Config: { ...image.Config, Cmd: ['sh'] } }]) {
     assert.throws(() => verifyImage([change], TARGET));
   }
+});
+
+test('Pi executable resolution supports read-only PATH fallback without installers', async t => {
+  const fake = await fakePi(t);
+  assert.equal(await resolvePiExecutable({ PATH: join(fake, '..'), HOME: join(fake, '..') }), fake);
+  assert.equal(await resolvePiExecutable({ NEWSHUB_PI_BIN: fake, PATH: '', HOME: join(fake, '..') }), fake);
+});
+
+test('common CLI launches only fixed Luna argv and accepts a verified JSONL terminal receipt', async t => {
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  const fake = await fakePi(t);
+  const result = invokeLocalCli(sha, fake, 'success', { env: { PI_CODING_AGENT_DIR: '/tmp/custom-pi-auth' } });
+  assert.equal(result.status, 0, result.stderr);
+  const terminal = JSON.parse(result.stdout);
+  assert.equal(terminal.ok, true);
+  assert.equal(terminal.sha, sha);
+  assert.equal(terminal.provider, 'openai-codex');
+  assert.equal(terminal.model, 'gpt-6-luna');
+  assert.equal(terminal.thinking, 'xhigh');
+  assert.equal(terminal.status, 'succeeded');
+  const contentResult = invokeLocalCli(sha, fake, 'content-receipt', { argsFile: `${fake}.content.args` });
+  assert.equal(contentResult.status, 0, contentResult.stderr);
+  assert.equal(JSON.parse(contentResult.stdout).jobId, 'job-fixed-1');
+  const captured = JSON.parse(await readFile(result.argsFile, 'utf8'));
+  const argv = captured.args;
+  assert.equal(captured.boundSha, sha);
+  assert.equal(captured.inheritedPiDir, '/tmp/custom-pi-auth');
+  for (const pair of [
+    ['--model', 'openai-codex/gpt-6-luna'], ['--thinking', 'xhigh'],
+    ['--tools', 'newshub_image_builder'], ['--name', 'newshub-local-image-builder-luna'],
+    ['--mode', 'json'],
+  ]) assert.deepEqual(argv.slice(argv.indexOf(pair[0]), argv.indexOf(pair[0]) + 2), pair);
+  for (const flag of ['--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates',
+    '--no-context-files', '--no-approve', '--no-session']) assert.ok(argv.includes(flag), flag);
+  assert.equal(argv[argv.indexOf('--extension') + 1], join(ROOT, '.pi/extensions/newshub-image-builder/index.ts'));
+  assert.match(argv.at(-1), new RegExp(sha));
+  assert.equal(argv.includes('--api-key'), false);
+});
+
+test('common CLI rejects missing, failed, malformed, unsettled, mismatched, and text-only receipts', async t => {
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  const fake = await fakePi(t);
+  const cases = [
+    ['missing', 5], ['assistant-text', 5], ['failed', 6], ['build-failed', 6],
+    ['malformed', 5], ['unsettled', 5], ['unauthorized-hang', 5],
+    ['nonzero', 4], ['model-mismatch', 5], ['sha-mismatch', 5], ['receipt-sha-mismatch', 5],
+    ['job-mismatch', 5], ['receipt-job-mismatch', 5], ['receipt-model-mismatch', 5],
+    ['evidence-missing', 6],
+  ];
+  for (const [mode, expectedExit] of cases) {
+    const result = invokeLocalCli(sha, fake, mode);
+    assert.equal(result.status, expectedExit, `${mode}: ${result.stderr}`);
+    assert.equal(result.stdout, '', mode);
+    assert.doesNotMatch(result.stderr, /api_key|secret|private prompt|provider payload/);
+    const error = JSON.parse(result.stderr);
+    assert.equal(error.ok, false, mode);
+  }
+  const failed = invokeLocalCli(sha, fake, 'failed');
+  const failedOutput = JSON.parse(failed.stderr);
+  assert.equal(failedOutput.job.id, 'job-fixed-1');
+  assert.equal(failedOutput.job.sha, sha);
+  assert.equal(failedOutput.job.status, 'failed');
+  assert.equal(failedOutput.job.diagnostics.childErrorMessage, 'Child inference failed (details redacted)');
+  assert.doesNotMatch(JSON.stringify(failedOutput), /raw-secret|provider payload/);
+  const buildFailed = JSON.parse(invokeLocalCli(sha, fake, 'build-failed').stderr);
+  assert.equal(buildFailed.job.diagnostics.buildErrorCode, 'DOCKER_BUILD_FAILED');
+  assert.equal(buildFailed.job.diagnostics.buildExitCode, 17);
+  assert.equal(buildFailed.job.error, 'Docker build failed (exit 17); no retry performed');
+  const injectionArgs = `${fake}.injection.args`;
+  const injected = spawnSync(WRAPPER, ['--sha', sha, '--execute', '--model', 'gpt-6-wrong'], {
+    cwd: ROOT, encoding: 'utf8', env: { ...process.env, PATH: `${NODE22_PATH}:${process.env.PATH}`,
+      NEWSHUB_PI_BIN: fake, FAKE_ARGS_FILE: injectionArgs },
+  });
+  assert.equal(injected.status, 2);
+  assert.equal(injected.stdout, '');
+  await assert.rejects(readFile(injectionArgs));
+});
+
+test('common CLI cancellation signals only its native Pi child and never reports success', async t => {
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  const fake = await fakePi(t);
+  const dir = join(fake, '..');
+  const started = join(dir, 'started');
+  const signalled = join(dir, 'signalled');
+  const child = spawn(WRAPPER, ['--sha', sha, '--execute'], { cwd: ROOT, env: {
+    ...process.env, PATH: `${NODE22_PATH}:${process.env.PATH}`, NEWSHUB_PI_BIN: fake,
+    FAKE_SHA: sha, FAKE_MODE: 'signal', FAKE_ARGS_FILE: `${fake}.signal-args`,
+    FAKE_STARTED_FILE: started, FAKE_SIGNAL_FILE: signalled,
+  }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+  child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+  const closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try { await readFile(started); break; }
+    catch { await new Promise(resolve => setTimeout(resolve, 20)); }
+  }
+  await readFile(started);
+  child.kill('SIGTERM');
+  const result = await closed;
+  assert.equal(result.code, 130);
+  assert.equal(stdout, '');
+  assert.equal(JSON.parse(stderr).error.code, 'CANCELLED');
+  assert.equal(await readFile(signalled, 'utf8'), 'SIGTERM');
 });
 
 test('cross-session lock is exclusive, never stolen, and released only by owner', async () => {

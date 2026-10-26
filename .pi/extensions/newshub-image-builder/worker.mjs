@@ -138,6 +138,10 @@ export function createImageBuildWorker({
     } catch (error) {
       throw preparationFailure('build-adapter', error);
     }
+    try {
+      if (typeof build.validateSource !== 'function') throw new Error('Source validator unavailable');
+      await build.validateSource(sha);
+    } catch (error) { throw preparationFailure('rules', error); }
     let documents;
     try { documents = await build.rules(sha); }
     catch (error) { throw preparationFailure('rules', error); }
@@ -166,7 +170,9 @@ export function createImageBuildWorker({
             try {
               const result = await build.build(sha);
               const evidence = build.evidence();
-              report({ imageEvidence: { verified: Boolean(evidence) } });
+              report({ reused: evidence?.reused === true, buildPerformed: evidence?.buildPerformed === true,
+                buildExitCode: evidence?.buildExitCode ?? null,
+                imageEvidence: { verified: Boolean(evidence) } });
               return { content: [{ type: 'text', text: JSON.stringify(result) }], details: result };
             } catch (error) {
               const failure = safeBuildFailure(error);
@@ -237,7 +243,7 @@ export function createImageBuildWorker({
       if (signal.aborted) {
         report({ cancelled: true });
       } else {
-        await agent.prompt(`Build only main@${validateTarget(sha)}. Report verified metadata; never deploy.`);
+        await agent.prompt(`Build only the explicit commit ${validateTarget(sha)}. Report verified metadata; never deploy.`);
       }
     } catch (error) {
       promptError = error;
