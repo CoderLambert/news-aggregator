@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BuildJobs, TARGET, PROVIDER, MODEL, THINKING, validateTarget } from '../core.mjs';
+import { BuildJobs, TARGET, PROVIDER, MODEL, THINKING, validateTarget, normalizeDiagnostics,
+  sanitizeDiagnosticMessage } from '../core.mjs';
+import { createImageBuildWorker, classifyChildError } from '../worker.mjs';
 import { safeRuntimePath, buildArgs, verifyImage, acquireLock, blocked, SOCKET,
   CI_NETWORK, SOCKET_VOLUME, CLIENT_IMAGE, CLIENT_USER, discoverClientTransport, clientArgs } from '../build.mjs';
 
@@ -29,11 +31,98 @@ function transportFixture() {
   };
 }
 
+const verifiedResult = {
+  revision: TARGET,
+  builderImage: { id: `sha256:${'a'.repeat(64)}`, revision: TARGET },
+  hostRuntime: { status: 'transfer-required', ready: false, imageId: null },
+  diagnostics: { imageEvidence: { verified: true } },
+};
+
 const deferred = () => {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
   return { promise, resolve };
 };
+
+function fakeAgent(behavior) {
+  return class FakeAgent {
+    constructor(options) {
+      this.options = options;
+      this.state = { messages: [], errorMessage: undefined };
+      this.listeners = new Set();
+    }
+    subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+    async emit(event) { for (const listener of this.listeners) await listener(event); }
+    abort() { this.onAbort?.(); }
+    async waitForIdle() {}
+    async prompt() {
+      if (behavior === 'hang') await new Promise(resolve => { this.onAbort = resolve; });
+      if (behavior === 'tool-success' || behavior === 'tool-failure') {
+        const tool = this.options.initialState.tools[0];
+        await this.emit({ type: 'tool_execution_start', toolCallId: 'fake-call', toolName: tool.name });
+        let isError = false;
+        let result;
+        try { result = await tool.execute({}); }
+        catch (error) { isError = true; result = { content: [{ type: 'text', text: error.message }] }; }
+        await this.emit({ type: 'tool_execution_end', toolCallId: 'fake-call', toolName: tool.name,
+          result, isError });
+      }
+      if (behavior === 'eof' || behavior === 'hang') return;
+      const assistant = behavior === 'provider-error'
+        ? { role: 'assistant', stopReason: 'error', errorMessage: 'prompt: private words https://private.invalid api_key=secret' }
+        : { role: 'assistant', stopReason: 'stop' };
+      assistant.usage = { input: 12, output: 3, cacheRead: 1, cacheWrite: 2, totalTokens: 18,
+        cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0.02, total: 0.33 } };
+      if (behavior === 'provider-error') this.state.errorMessage = assistant.errorMessage;
+      this.state.messages.push(assistant);
+      await this.emit({ type: 'message_end', message: assistant });
+      await this.emit({ type: 'turn_end', message: assistant, toolResults: [] });
+    }
+  };
+}
+
+function workerFixture(behavior, failBuild = false, deadlineMs = 1000, missingEvidence = false, prepareFailure = null) {
+  let buildCalls = 0;
+  let evidence;
+  const model = { provider: PROVIDER, id: MODEL };
+  const registry = {
+    find: () => model,
+    hasConfiguredAuth: () => true,
+    streamSimple: () => { throw new Error('Fake Agent must not call streamSimple'); },
+  };
+  const worker = createImageBuildWorker({
+    AgentClass: prepareFailure === 'agent-construction' ? class {
+      constructor() { throw Object.assign(new Error('private constructor payload'), { code: 'EACCES', exitCode: 13 }); }
+    } : fakeAgent(behavior),
+    clampThinkingLevel: () => THINKING,
+    toolParameters: { type: 'object' },
+    getRegistry: () => registry,
+    createBuild: () => {
+      if (prepareFailure === 'build-adapter') {
+        throw Object.assign(new Error('private adapter payload'), { code: 'EACCES', exitCode: 13 });
+      }
+      return {
+      rules: async () => {
+        if (prepareFailure === 'rules') {
+          throw Object.assign(new Error('private rules payload'), { code: 'EACCES', exitCode: 13 });
+        }
+        return 'public committed rules only';
+      },
+      build: async () => {
+        buildCalls++;
+        if (failBuild) throw Object.assign(new Error('provider prompt secret https://private.invalid'), {
+          code: 'NEWSHUB_BLOCKED', safeMessage: 'Docker build failed (exit 17); no retry performed',
+        });
+        if (!missingEvidence) evidence = verifiedResult;
+        return verifiedResult;
+      },
+      evidence: () => evidence,
+    };
+    },
+    root: '/repo', deadlineMs,
+  });
+  return { worker, buildCalls: () => buildCalls };
+}
 
 test('exact model and accepted SHA only; malformed or moving targets rejected', () => {
   assert.equal(`${PROVIDER}/${MODEL}`, 'openai-codex/gpt-6-luna');
@@ -59,11 +148,140 @@ test('start, query and wait preserve identity and reject concurrent duplicate jo
   assert.equal(job.status, 'running');
   assert.equal(job.thinking, 'xhigh');
   assert.throws(() => jobs.start(TARGET, true), /already running/);
-  gate.resolve({ revision: TARGET });
+  gate.resolve(verifiedResult);
   const result = await jobs.wait(job.id, 1);
   assert.equal(result.status, 'succeeded');
   assert.equal(result.result.revision, TARGET);
   assert.throws(() => jobs.status('missing'), /Unknown job/);
+});
+
+test('build and child failure diagnostics survive query/wait without leaking unsafe text', async () => {
+  const failure = Object.assign(new Error('Docker build failed (exit 17)'), {
+    code: 'NEWSHUB_BUILD_FAILURE', safeMessage: 'Docker build failed (exit 17)',
+    diagnostics: { buildCalled: true, buildErrorCode: 'DOCKER_BUILD_FAILED', buildExitCode: 17,
+      buildErrorMessage: 'Docker build failed (exit 17)', childStopReason: 'stop', childErrorMessage: null,
+      cancelled: false, timedOut: false,
+      imageEvidence: { verified: false } },
+  });
+  const jobs = new BuildJobs(async () => { throw failure; });
+  const started = jobs.start(TARGET, true);
+  const waited = await jobs.wait(started.id, 1);
+  assert.deepEqual(waited.diagnostics, normalizeDiagnostics(failure.diagnostics));
+  assert.deepEqual(jobs.status(started.id).diagnostics, normalizeDiagnostics(failure.diagnostics));
+  assert.equal(waited.error, 'Docker build failed (exit 17)');
+});
+
+test('real worker reports its concrete build-tool failure instead of the generic completion failure', async () => {
+  const fixture = workerFixture('tool-failure', true);
+  const jobs = new BuildJobs(fixture.worker);
+  const started = jobs.start(TARGET, true);
+  const waited = await jobs.wait(started.id, 1);
+  assert.equal(fixture.buildCalls(), 1);
+  assert.equal(waited.status, 'failed');
+  assert.equal(waited.error, 'Docker build failed (exit 17); no retry performed');
+  assert.equal(waited.diagnostics.buildCalled, true);
+  assert.equal(waited.diagnostics.buildErrorCode, 'DOCKER_BUILD_FAILED');
+  assert.equal(waited.diagnostics.buildExitCode, 17);
+  assert.equal(waited.diagnostics.childStopReason, 'stop');
+  assert.equal(waited.diagnostics.imageEvidence.verified, false);
+  assert.deepEqual(jobs.get(started.id).usage, {
+    input: 12, output: 3, cacheRead: 1, cacheWrite: 2, totalTokens: 18,
+    cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0.02, total: 0.33 },
+  });
+  assert.equal(jobs.status(started.id).error, waited.error);
+});
+
+test('worker rejects provider errors, EOF, and unverified tool results without false success or leaks', async () => {
+  for (const behavior of ['provider-error', 'eof']) {
+    const fixture = workerFixture(behavior);
+    const jobs = new BuildJobs(fixture.worker);
+    const started = jobs.start(TARGET, true);
+    const waited = await jobs.wait(started.id, 1);
+    assert.equal(waited.status, 'failed');
+    assert.equal(waited.diagnostics.buildCalled, false);
+    assert.equal(waited.diagnostics.imageEvidence.verified, false);
+    assert.equal(fixture.buildCalls(), 0);
+    assert.doesNotMatch(JSON.stringify(waited), /private words|private\.invalid|api_key=secret/);
+    if (behavior === 'provider-error') {
+      assert.equal(waited.diagnostics.childStopReason, 'error');
+      assert.equal(waited.diagnostics.childErrorMessage, 'Provider inference failed (details redacted)');
+    } else {
+      assert.equal(waited.diagnostics.childErrorMessage, 'Agent returned no assistant completion');
+    }
+  }
+  const missing = workerFixture('tool-success', false, 1000, true);
+  await assert.rejects(missing.worker(TARGET, new AbortController().signal), /without verified image evidence/);
+  assert.equal(missing.buildCalls(), 1);
+});
+
+test('worker exposes timeout state and bounds child error text', async () => {
+  const fixture = workerFixture('hang', false, 5);
+  const jobs = new BuildJobs(fixture.worker);
+  const started = jobs.start(TARGET, true);
+  const waited = await jobs.wait(started.id, 1);
+  assert.equal(waited.status, 'failed');
+  assert.equal(waited.diagnostics.timedOut, true);
+  assert.equal(waited.diagnostics.imageEvidence.verified, false);
+  assert.equal(fixture.buildCalls(), 0);
+  const diagnostics = normalizeDiagnostics({
+    buildErrorCode: 'https://private.invalid/token', buildExitCode: 999,
+    buildErrorMessage: 'prompt=private text; api_key=secret https://secret.invalid Bearer secretvalue',
+    childErrorMessage: 'provider returned prompt and credentials',
+  });
+  assert.equal(diagnostics.buildErrorCode, null);
+  assert.equal(diagnostics.buildExitCode, null);
+  assert.equal(diagnostics.childErrorMessage, 'Child inference failed (details redacted)');
+  assert.doesNotMatch(JSON.stringify(diagnostics), /private text|secretvalue|secret\.invalid|api_key=secret/);
+});
+
+test('preparation failures retain safe stage, code, exit status, and failure usage', async () => {
+  for (const stage of ['build-adapter', 'rules', 'agent-construction']) {
+    const fixture = workerFixture('eof', false, 1000, false, stage);
+    let failure;
+    try { await fixture.worker(TARGET, new AbortController().signal); }
+    catch (error) { failure = error; }
+    assert.ok(failure, stage);
+    assert.equal(failure.diagnostics.preparationStage, stage);
+    assert.equal(failure.diagnostics.preparationErrorCode, 'EACCES');
+    assert.equal(failure.diagnostics.preparationExitCode, 13);
+    assert.equal(failure.diagnostics.preparationErrorMessage, 'Worker preparation failed (details redacted)');
+    assert.equal(failure.usage.totalTokens, 0);
+    assert.doesNotMatch(JSON.stringify(failure.diagnostics), /private .* payload/);
+  }
+});
+
+test('child failures retain safe cause categories without arbitrary provider text', () => {
+  const cases = [
+    ['Connection closed by proxy server before the response completed', undefined, 'PROXY_EOF', 'Connection closed before response completed'],
+    ['request failed with status code 401: {"api_key":"private"}', undefined, 'HTTP_401', 'Provider authentication rejected (HTTP 401)'],
+    ['HTTP 403: secret body', undefined, 'HTTP_403', 'Provider authorization rejected (HTTP 403)'],
+    ['status code 429: provider payload', undefined, 'HTTP_429', 'Provider rate limited (HTTP 429)'],
+    ['400 unsupported parameter `reasoning` with private payload', undefined, 'UNSUPPORTED_PARAMETER', 'Provider rejected an unsupported request parameter'],
+    ['model gpt-6-luna not found: private response', undefined, 'MODEL_NOT_FOUND', 'Requested model was not found'],
+    [undefined, 'ECONNRESET', 'ECONNRESET', 'Connection closed before response completed'],
+    [undefined, 'HTTP_401', 'HTTP_401', 'Provider authentication rejected (HTTP 401)'],
+    ['unexpected EOF: private payload', undefined, 'PROXY_EOF', 'Connection closed before response completed'],
+  ];
+  for (const [message, code, expectedCode, expectedMessage] of cases) {
+    const result = classifyChildError(message, code, 'error');
+    assert.equal(result.code, expectedCode);
+    assert.equal(result.message, expectedMessage);
+    assert.doesNotMatch(JSON.stringify(result), /private|secret|payload|reasoning/);
+  }
+});
+
+test('quoted JSON credentials, multiword values, prompts, and malformed payloads are redacted', () => {
+  const examples = [
+    '{"password":"multi word private phrase","api_key":"sk-verysecretcredentialvalue"}',
+    '{"access_token": "unterminated multi word credential',
+    'prompt: "private multi word instruction"; password="quoted secret value"',
+    'bad provider payload {"refresh_token":"malformed secret with spaces',
+  ];
+  for (const example of examples) {
+    const safe = sanitizeDiagnosticMessage(example);
+    assert.ok(safe.length <= 240);
+    assert.doesNotMatch(safe, /private phrase|verysecretcredentialvalue|unterminated multi word credential|private multi word instruction|quoted secret value|malformed secret with spaces/);
+  }
 });
 
 test('raw provider errors redacted; blockers never become success', async () => {
@@ -90,6 +308,7 @@ test('cancelled wait does not cancel job; shutdown aborts and settles its own jo
   assert.equal(jobs.status(id).status, 'running');
   await jobs.close();
   assert.equal(jobs.status(id).status, 'cancelled');
+  assert.equal(jobs.status(id).diagnostics.cancelled, true);
   assert.throws(() => jobs.start(TARGET, true), /shutting down/);
 });
 

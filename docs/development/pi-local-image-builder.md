@@ -25,7 +25,7 @@
 {"action":"wait","jobId":"<id>","waitSeconds":30}
 ```
 
-`wait` 最多等待 60 秒；超时返回真实的 `running`，可继续等待。取消等待不取消构建。终态为 `succeeded`、`blocked`、`failed` 或 `cancelled`。`succeeded` 仅表示私有 DinD 中的 builder image 已校验且代理正常终结；结果明确带有 `hostRuntime.status=transfer-required`，不表示宿主运行时镜像已就绪。
+`wait` 最多等待 60 秒；超时返回真实的 `running`，可继续等待。取消等待不取消构建。终态为 `succeeded`、`blocked`、`failed` 或 `cancelled`。查询/等待同时返回有界 `diagnostics`：是否调用 `build_image`、安全的构建错误码/退出码、准备阶段及安全错误码/退出码、子 Agent 的 stop reason 与脱敏错误分类、取消/超时状态及是否取得镜像证据。provider 常见 HTTP/网络故障只返回固定分类，不回传任意原始文本。具体构建工具错误优先于模型的后续总结；provider 原始错误、URL、凭据和 prompt 不会返回。`succeeded` 仅表示私有 DinD 中的 builder image 已校验且代理正常终结；结果明确带有 `hostRuntime.status=transfer-required`，不表示宿主运行时镜像已就绪。
 
 任务及独立上下文在当前 Pi 扩展会话内可查询；不是跨重启任务服务。关闭或 reload 会取消并等待本扩展的工作，随后丢弃内存记录。公共 Git 目录的 `newshub-pi-image-builder.lock` 阻止不同 Pi 会话/工作树重复构建；崩溃留下的锁不会自动抢占，需先人工确认没有运行中的构建。它不能约束不使用此锁的外部构建工具。
 
@@ -41,7 +41,7 @@
 
 ## 离线检查
 
-既有 CI unittest 入口会发现 `ops/ci/tests/test_pi_image_builder.py`。使用 CI Node 22；不安装依赖，不调用模型或 Docker：
+既有 CI unittest 入口会发现 `ops/ci/tests/test_pi_image_builder.py`。使用 CI Node 22；不安装依赖，不调用模型或 Docker。离线回归直接覆盖 worker 注入边界、工具错误传播、provider/EOF/取消/超时及无证据失败：
 
 ```bash
 node --test .pi/extensions/newshub-image-builder/tests/offline.test.mjs
