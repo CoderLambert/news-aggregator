@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import CatalogTaxonomyFilter, { parseCatalogSections } from '@/features/rss/CatalogTaxonomyFilter'
+import CatalogTaxonomyFilter from '@/features/rss/CatalogTaxonomyFilter'
+import { parseCatalogSections } from '@/features/rss/catalogTaxonomy'
 
 afterEach(cleanup)
 const sections = [

@@ -17,6 +17,7 @@ from api.rss.directory import (
     import_pinned_seed, import_snapshot, search_directory,
 )
 from api.rss.directory_models import FeedDirectoryEntry, FeedDirectorySnapshot
+from api.rss.catalog_taxonomy import SECTIONS
 
 
 def seed():
@@ -197,6 +198,10 @@ def test_rsshub_ignores_scripts_analytics_and_preserves_requirements():
 def test_empty_directory_and_input_limits():
     assert search_directory() == {
         'results': [], 'next_cursor': None, 'snapshot_version': None,
+        'total': 0,
+        'count_scope': 'public_catalog_unique_feed_urls',
+        'sections': [dict(section, count=0, groups=[dict(group, count=0) for group in section['groups']])
+                     for section in SECTIONS],
         'categories': [
             {'id': 'ai', 'name': '人工智能'},
             {'id': 'engineering', 'name': '编程与技术'},

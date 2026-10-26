@@ -7,7 +7,8 @@ import { verificationError } from '@/services/rssAdminApi'
 import { refreshRssViews } from '@/features/rss/queryRefresh'
 import DirectoryChannelCard from '@/features/rss/DirectoryChannelCard'
 import type { DirectoryEntry } from '@/features/rss/DirectoryChannelCard'
-import CatalogTaxonomyFilter, { parseCatalogSections, type CatalogFilters, type CatalogSection } from '@/features/rss/CatalogTaxonomyFilter'
+import CatalogTaxonomyFilter from '@/features/rss/CatalogTaxonomyFilter'
+import { parseCatalogSections, type CatalogFilters, type CatalogSection } from '@/features/rss/catalogTaxonomy'
 import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot } from '@/types/channels'
 
 interface Candidate { url: string; title: string; candidate_token: string }
