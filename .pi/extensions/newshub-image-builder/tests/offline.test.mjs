@@ -18,6 +18,15 @@ test('existing builder services are preserved, not mistaken for busy workers', (
   assert.throws(() => buildModule.preservedContainerNames('invalid;command\n', 'own-client'));
 });
 
+test('local image follows the accepted development user and cache contract', () => {
+  assert.deepEqual(buildArgs(TARGET), ['build', '--progress=plain', '--target', 'development',
+    '--label', `org.opencontainers.image.revision=${TARGET}`, '--tag', `newshub:dev-${TARGET}`, '/context']);
+  const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64',
+    Config: { User: 'root', Cmd: ['/app/docker-entrypoint.sh'],
+      Labels: { 'org.opencontainers.image.revision': TARGET } } };
+  assert.equal(verifyImage([image], TARGET).builderImage.user, 'root');
+});
+
 const dindImageId = `sha256:${'b'.repeat(64)}`;
 const service = (name, serviceName, mounts = []) => ({
   Name: `/${name}`, Image: dindImageId,
@@ -383,13 +392,13 @@ test('regression: private-volume client replaces the old host-socket assumption'
   ]);
   assert.ok(args.includes(CI_NETWORK));
   assert.ok(!args.some(arg => arg.includes('/var/run/docker.sock') || arg.includes('runner-state') || arg.includes('runner-work')));
-  assert.deepEqual(buildArgs(TARGET), ['build', '--progress=plain', '--target', 'production',
-    '--build-arg', `RELEASE_SHA=${TARGET}`, '--tag', `newshub:dev-${TARGET}`, '/context']);
+  assert.deepEqual(buildArgs(TARGET), ['build', '--progress=plain', '--target', 'development',
+    '--label', `org.opencontainers.image.revision=${TARGET}`, '--tag', `newshub:dev-${TARGET}`, '/context']);
 });
 
-test('tag alone, wrong revision, root user and wrong entrypoint are not success', () => {
+test('tag alone, wrong revision, mismatched local user and wrong entrypoint are not success', () => {
   const image = { Id: `sha256:${'a'.repeat(64)}`, Os: 'linux', Architecture: 'amd64',
-    Config: { User: '10001:10001', Cmd: ['/app/docker-entrypoint.sh'],
+    Config: { User: 'root', Cmd: ['/app/docker-entrypoint.sh'],
       Labels: { 'org.opencontainers.image.revision': TARGET } } };
   const result = verifyImage([image], TARGET);
   assert.equal(result.revision, TARGET);
@@ -397,7 +406,7 @@ test('tag alone, wrong revision, root user and wrong entrypoint are not success'
   assert.equal(result.builderImage.id, image.Id);
   assert.deepEqual(result.hostRuntime, { status: 'transfer-required', ready: false, imageId: null });
   for (const change of [undefined, { ...image, Id: 'tag-only' },
-    { ...image, Config: { ...image.Config, User: 'root' } },
+    { ...image, Config: { ...image.Config, User: '10001:10001' } },
     { ...image, Config: { ...image.Config, Labels: {} } },
     { ...image, Config: { ...image.Config, Cmd: ['sh'] } }]) {
     assert.throws(() => verifyImage([change], TARGET));

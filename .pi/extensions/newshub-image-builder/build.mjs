@@ -117,19 +117,21 @@ export function preservedContainerNames(stdout, clientName) {
 
 export function buildArgs(sha) {
   validateTarget(sha);
-  // Context is the sanitized immutable Git export mounted read-only in the client.
-  return ['build', '--progress=plain', '--target', 'production', '--build-arg',
-    `RELEASE_SHA=${sha}`, '--tag', `newshub:dev-${sha}`, '/context'];
+  // This is the existing local development contract, not a production release.
+  // A late metadata label preserves exact source identity without changing
+  // dependency layers, the accepted runtime user, data ownership or cache path.
+  return ['build', '--progress=plain', '--target', 'development', '--label',
+    `org.opencontainers.image.revision=${sha}`, '--tag', `newshub:dev-${sha}`, '/context'];
 }
 
 export function verifyImage(items, sha) {
   const image = items?.[0];
   if (!image?.Id?.match(/^sha256:[0-9a-f]{64}$/) ||
       image.Config?.Labels?.['org.opencontainers.image.revision'] !== sha ||
-      image.Config?.User !== '10001:10001' ||
+      image.Config?.User !== 'root' ||
       JSON.stringify(image.Config?.Cmd) !== JSON.stringify(['/app/docker-entrypoint.sh']) ||
       image.Os !== 'linux' || !image.Architecture) {
-    throw blocked('Private builder image metadata does not match the exact source/production runtime contract');
+    throw blocked('Private builder image metadata does not match the exact source/local-development runtime contract');
   }
   return {
     builderImage: { location: 'isolated-ci-dind', reference: `newshub:dev-${sha}`,

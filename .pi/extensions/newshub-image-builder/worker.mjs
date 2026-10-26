@@ -146,6 +146,7 @@ export function createImageBuildWorker({
       initialState: {
         model, thinkingLevel: THINKING, messages: [],
         systemPrompt: 'You are the NewsHub local-image-builder-luna, a Pi-native build-only agent. ' +
+          'Use the repository development target for the accepted local root-user/data/cache contract; this is not a production release. ' +
           'Read the supplied rules and build exactly the authorized SHA using build_image once. ' +
           'No delegation, shell, source edits, credentials, business data, deployment, migrations, ' +
           'runtime probes, service changes, cache cleaning, Git/image pushes or CI. ' +
