@@ -104,6 +104,17 @@ export function clientArgs({ name, taskId, context, command, transport }) {
     '--workdir', '/context', '--entrypoint', 'docker', transport.clientImageId, ...command];
 }
 
+// Existing services are not evidence that a CI job is active. Runner.Worker
+// checks above and the cross-session lock guard build ownership; leave existing
+// daemon services running and record their names instead of replacing them.
+export function preservedContainerNames(stdout, clientName) {
+  const names = String(stdout).split(/\r?\n/).map(name => name.trim()).filter(Boolean);
+  if (names.some(name => !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name))) {
+    throw blocked('Isolated builder returned malformed container metadata');
+  }
+  return names.filter(name => name !== clientName);
+}
+
 export function buildArgs(sha) {
   validateTarget(sha);
   // Context is the sanitized immutable Git export mounted read-only in the client.
@@ -317,9 +328,8 @@ export function createBuild(root, signal) {
           }
         };
 
-        const running = (await client(['ps', '--format', '{{.Names}}'])).stdout
-          .split(/\r?\n/).map(name => name.trim()).filter(name => name && name !== clientName);
-        if (running.length) throw blocked('The isolated builder has other running containers; refusing to build');
+        const preservedBuilderContainers = preservedContainerNames(
+          (await client(['ps', '--format', '{{.Names}}'])).stdout, clientName);
         const tag = `newshub:dev-${sha}`;
         if ((await client(['image', 'ls', '-q', tag])).stdout.trim()) {
           throw blocked('Exact target tag already exists; inspect it rather than overwrite it');
@@ -337,7 +347,7 @@ export function createBuild(root, signal) {
           Config: { User: user, Cmd: cmd, Labels: { 'org.opencontainers.image.revision': revision } } };
         evidence = { ...verifyImage([image], sha), exitCode: buildResult.code,
           command: ['docker', 'run', '--pull=never', '--entrypoint', 'docker', transport.clientImageId, ...buildArgs(sha)],
-          cache, context, note: 'Private builder image verified in isolated DinD. Disposable client containers were run; no application containers were started. Host runtime transfer is required and has not occurred.' };
+          cache, context, preservedBuilderContainers, note: 'Private builder image verified in isolated DinD. Disposable client containers were run; no application containers were started. Host runtime transfer is required and has not occurred.' };
         return evidence;
       } finally {
         if (safeToReleaseLock) await release();

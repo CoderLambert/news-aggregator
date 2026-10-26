@@ -6,8 +6,17 @@ import { join } from 'node:path';
 import { BuildJobs, TARGET, PROVIDER, MODEL, THINKING, validateTarget, normalizeDiagnostics,
   sanitizeDiagnosticMessage } from '../core.mjs';
 import { createImageBuildWorker, classifyChildError } from '../worker.mjs';
+import * as buildModule from '../build.mjs';
 import { safeRuntimePath, buildArgs, verifyImage, acquireLock, blocked, SOCKET,
   CI_NETWORK, SOCKET_VOLUME, CLIENT_IMAGE, CLIENT_USER, discoverClientTransport, clientArgs } from '../build.mjs';
+
+test('existing builder services are preserved, not mistaken for busy workers', () => {
+  assert.equal(typeof buildModule.preservedContainerNames, 'function');
+  assert.deepEqual(buildModule.preservedContainerNames('adoring_goldberg\nquizzical_kalam\n', 'own-client'),
+    ['adoring_goldberg', 'quizzical_kalam']);
+  assert.deepEqual(buildModule.preservedContainerNames('own-client\n', 'own-client'), []);
+  assert.throws(() => buildModule.preservedContainerNames('invalid;command\n', 'own-client'));
+});
 
 const dindImageId = `sha256:${'b'.repeat(64)}`;
 const service = (name, serviceName, mounts = []) => ({
