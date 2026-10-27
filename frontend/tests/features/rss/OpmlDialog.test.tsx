@@ -96,7 +96,7 @@ describe('personal OPML workflow', () => {
   })
 
   it('explains cross-root conflicts and does not auto select a conflicting target', async () => {
-    request.mockResolvedValueOnce({ ...batch, group_plan: { Tech: {
+    request.mockResolvedValueOnce({ ...batch, group_matches: { Tech: 7 }, group_plan: { Tech: {
       root_name: 'Imported', name: 'Tech', action: 'conflict', group_id: null, create_root: true,
       reason: '已有同名子分组位于其他栏目，不会移动，请手动映射',
     } } })

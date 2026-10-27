@@ -46,7 +46,7 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
   }, onSuccess: batch => {
     if (!lifetime.current) return
     setSelected(batch.items.filter(item => item.status !== 'invalid' && (item.outcome !== 'already_subscribed' || item.can_organize)).map(item => item.id))
-    setGroupMap({ ...Object.fromEntries(Object.entries(batch.group_matches ?? {}).map(([path, id]) => [path, String(id)])),
+    setGroupMap({ ...Object.fromEntries(Object.entries(batch.group_matches ?? {}).filter(([path]) => batch.group_plan?.[path]?.action !== 'conflict').map(([path, id]) => [path, String(id)])),
       ...Object.fromEntries(Object.entries(batch.group_plan ?? {}).filter(([, plan]) => plan.action !== 'conflict').map(([path]) => [path, 'auto'])),
     })
   } })
