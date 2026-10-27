@@ -134,6 +134,10 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
       <p className="workspace-eyebrow">快捷分组 <span>频道数</span></p>
       <Link to={readingLink('all')} onClick={() => setDrawer(false)}><FolderOpen size={15} aria-hidden="true" />全部资讯</Link>
       <Link to={readingLink('ungrouped')} onClick={() => setDrawer(false)}><FolderOpen size={15} aria-hidden="true" />未加入分组</Link>
+      {(config.groups.data ?? []).filter(group => group.root_id === null).map(group => <Link key={group.id} to={readingLink('group', group.id)} onClick={() => setDrawer(false)}
+        aria-current={location.pathname === '/' && new URLSearchParams(location.search).get('group_id') === String(group.id) ? 'page' : undefined}>
+        <span className="workspace-topic-dot" aria-hidden="true" /><span className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere]" title={group.name}>{channelGroupPath(group, config.roots.data ?? [])}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
+      </Link>)}
       {(config.roots.data ?? []).map(root => {
         const children = (config.groups.data ?? []).filter(group => group.root_id === root.id)
         const collapsed = collapsedRoots.has(root.id)
@@ -150,7 +154,7 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
           </Button>
           {!collapsed && children.map(group => <Link className="ml-3" key={group.id} to={readingLink('group', group.id)} onClick={() => setDrawer(false)}
             aria-current={location.pathname === '/' && new URLSearchParams(location.search).get('group_id') === String(group.id) ? 'page' : undefined}>
-            <span className="workspace-topic-dot" aria-hidden="true" /><span className="workspace-truncate">{channelGroupPath(group, config.roots.data ?? [])}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
+            <span className="workspace-topic-dot" aria-hidden="true" /><span className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere]" title={channelGroupPath(group, config.roots.data ?? [])}>{channelGroupPath(group, config.roots.data ?? [])}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
           </Link>)}
         </div>
       })}

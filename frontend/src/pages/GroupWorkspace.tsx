@@ -22,7 +22,7 @@ import { ModelCombobox } from '@/components/ui/model-combobox'
 
 type Editor =
   | { kind: 'root'; id: number | null; name: string; version: number }
-  | { kind: 'child'; id: number | null; name: string; rootId: number; version: number }
+  | { kind: 'child'; id: number | null; name: string; rootId: number | null; version: number }
 type Deleting = { kind: 'root'; row: ChannelGroupRoot } | { kind: 'child'; row: ChannelGroup }
 
 export default function GroupWorkspace() {
@@ -62,7 +62,10 @@ function Groups() {
   const requestedGroup = groups.find(item => String(item.id) === params.get('group'))
   const requestedRoot = roots.find(item => String(item.id) === params.get('root'))
   const root = requestedGroup ? roots.find(item => item.id === requestedGroup.root_id) : requestedRoot ?? roots[0]
-  const group = requestedGroup?.root_id === root?.id ? requestedGroup : undefined
+  const group = requestedGroup ?? (!root ? groups.find(item => item.root_id === null) : undefined)
+  const editedGroup = editor?.kind === 'child' && editor.id !== null ? groups.find(item => item.id === editor.id) : undefined
+  const structureChanged = editor?.kind === 'child' && !!editedGroup && editedGroup.root_id !== editor.rootId
+  const editedPath = editor?.kind === 'child' ? (editor.rootId === null ? editor.name.trim() : `${roots.find(item => item.id === editor.rootId)?.name ?? '未知根分类'} / ${editor.name.trim()}`) : ''
   const rootParam = params.get('root')
   const groupParam = params.get('group')
   useEffect(() => {
@@ -115,7 +118,7 @@ function Groups() {
     finally { reconciling.current = false; if (lifetime.current && !lifetime.current.signal.aborted) setReloadPending(false) }
   }
   const selectRoot = (id: number) => { setParams({ root: String(id) }); setSelected([]) }
-  const selectGroup = (row: ChannelGroup) => { setParams({ root: String(row.root_id), group: String(row.id) }); setSelected([]) }
+  const selectGroup = (row: ChannelGroup) => { setParams(row.root_id === null ? { group: String(row.id) } : { root: String(row.root_id), group: String(row.id) }); setSelected([]) }
   const closeModal = () => { if (!submitting.current) { setEditor(null); setDeleting(null) } }
   const saveEditor = () => {
     if (!editor || !editor.name.trim()) return
@@ -129,8 +132,8 @@ function Groups() {
       run(() => editor.id === null ? createChannelGroup(name, editor.rootId) : updateChannelGroup(editor.id, {
         name, root_id: editor.rootId, expected_version: editor.version,
       }), '子分组已保存', value => {
-        if (isRecord(value) && typeof value.id === 'number' && typeof value.root_id === 'number') {
-          setParams({ root: String(value.root_id), group: String(value.id) })
+        if (isRecord(value) && typeof value.id === 'number' && (value.root_id === null || typeof value.root_id === 'number')) {
+          setParams(value.root_id === null ? { group: String(value.id) } : { root: String(value.root_id), group: String(value.id) })
         }
         setEditor(null); setSelected([])
       })
@@ -141,12 +144,13 @@ function Groups() {
     if (deleting.kind === 'root') {
       run(() => deleteChannelGroupRoot(deleting.row.id, deleting.row.version), '空根分类已删除', () => { setDeleting(null); setParams({}); setSelected([]) })
     } else {
-      run(() => deleteChannelGroup(deleting.row.id), '子分组已删除，订阅保持不变', () => { setDeleting(null); setParams({ root: String(deleting.row.root_id) }); setSelected([]) })
+      run(() => deleteChannelGroup(deleting.row.id), '子分组已删除，订阅保持不变', () => { setDeleting(null); setParams(deleting.row.root_id === null ? {} : { root: String(deleting.row.root_id) }); setSelected([]) })
     }
   }
   return <div className="workspace-page min-w-0 overflow-x-hidden">
-    <header className="workspace-page-heading"><div><p className="workspace-eyebrow">按你的方式阅读</p><h1>分组层级</h1><p>根分类只负责整理；频道成员与阅读范围始终属于子分组。</p></div>
+    <header className="workspace-page-heading"><div><p className="workspace-eyebrow">按你的方式阅读</p><h1>分组层级</h1><p>可直接创建个人分组，也可在根分类下组织子分组；频道成员与阅读范围属于分组。</p></div>
       <div className="workspace-actions"><Link className="workspace-button secondary" to="/channels/smart"><Sparkles size={16} aria-hidden="true" />智能整理</Link>
+        <Button type="button" disabled={!!user && !writable} onClick={() => user ? setEditor({ kind: 'child', id: null, name: '', rootId: null, version: 1 }) : setLogin(true)}><Plus size={16} aria-hidden="true" />新建分组</Button>
         <Button className="workspace-button" type="button" disabled={!!user && !writable} onClick={() => user ? setEditor({ kind: 'root', id: null, name: '', version: 1 }) : setLogin(true)}><Plus size={16} aria-hidden="true" />新建根分类</Button></div></header>
     {!user && !loading && <div className="workspace-empty"><h2>建立自己的阅读分组</h2><p>登录后，分组与订阅会随账号同步。</p><Button type="button" className="workspace-button" onClick={() => setLogin(true)}>登录</Button></div>}
     {user && (loading || !config.ready) && !config.error && <p role="status">正在读取分组层级…</p>}
@@ -159,6 +163,8 @@ function Groups() {
     {mutation.isError && <p role="alert" className="workspace-error">操作未确认成功，请刷新层级核对结果后再重试。</p>}
     {user && config.ready && !config.error && <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]">
       <nav aria-label="分组层级" className="workspace-panel min-w-0 self-start p-3">
+        {groups.filter(item => item.root_id === null).map(item => <Button key={item.id} type="button" variant={group?.id === item.id ? 'secondary' : 'ghost'}
+          className="h-auto w-full min-w-0 justify-start whitespace-normal text-left" onClick={() => selectGroup(item)}><FolderOpen size={16} className="shrink-0" /><span className="break-words [overflow-wrap:anywhere]">{channelGroupPath(item, roots)}</span><span className="ml-auto text-xs text-muted-foreground">{item.source_ids.length}</span></Button>)}
         {roots.map(item => {
           const children = groups.filter(child => child.root_id === item.id)
           const isCollapsed = collapsed.has(item.id)
@@ -210,16 +216,20 @@ function Groups() {
           <div className="workspace-group-sources">{sources.map(source => <label key={source.id} className="workspace-group-source"><Input className="size-4 shrink-0" type="checkbox" disabled={uncertainBulk} aria-label={'选择 ' + source.name} checked={selected.includes(source.id)} onChange={event => setSelected(current => event.target.checked ? [...current, source.id] : current.filter(id => id !== source.id))} /><ChannelMark source={source} /><span><strong>{source.name}</strong><TopicTags keys={source.topics} topics={catalog.data?.topics ?? []} /></span><small>{group.source_ids.includes(source.id) ? '已加入' : '未加入'}</small></label>)}</div>
           {!catalog.isPending && !catalog.isError && !sources.length && <div className="workspace-empty"><p>{subscriptions.size ? '没有匹配的频道，可切换为“全部订阅”来添加成员。' : '还没有订阅频道。'}</p><Link className="workspace-button secondary" to="/channels">选择频道</Link></div>}
         </section>}
-        {!root && <div className="workspace-empty"><h2>还没有分组层级</h2><p>先创建根分类，再在其中创建子分组；也可以使用智能整理生成可审核建议。</p></div>}
+        {!root && !group && <div className="workspace-empty"><h2>还没有分组</h2><p>可以直接创建个人分组；需要两级分类时再创建根分类。</p></div>}
       </div>
     </div>}
     {login && <AuthModal onClose={() => setLogin(false)} />}
-    {editor && <WorkspaceModal title={editor.kind === 'root' ? (editor.id === null ? '新建根分类' : '重命名根分类') : (editor.id === null ? '新建子分组' : '编辑子分组')} busy={mutation.isPending} onClose={closeModal}>
-      <form onSubmit={event => { event.preventDefault(); saveEditor() }}><label>{editor.kind === 'root' ? '根分类名称' : '子分组名称'}<Input autoFocus required maxLength={40} value={editor.name} disabled={mutation.isPending} onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
-        {editor.kind === 'child' && <label>所属根分类<NativeSelect aria-label="所属根分类" value={String(editor.rootId)} disabled={mutation.isPending} onChange={event => setEditor({ ...editor, rootId: Number(event.target.value) })}>{roots.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</NativeSelect></label>}
+    {editor && <WorkspaceModal title={editor.kind === 'root' ? (editor.id === null ? '新建根分类' : '重命名根分类') : (editor.rootId === null ? (editor.id === null ? '新建分组' : '编辑分组') : (editor.id === null ? '新建子分组' : '编辑子分组'))} busy={mutation.isPending} onClose={closeModal}>
+      <form onSubmit={event => { event.preventDefault(); saveEditor() }}><label>{editor.kind === 'root' ? '根分类名称' : editor.rootId === null ? '分组名称' : '子分组名称'}<Input autoFocus required maxLength={40} value={editor.name} disabled={mutation.isPending} onChange={event => setEditor({ ...editor, name: event.target.value })} /></label>
+        {editor.kind === 'child' && <label>所属根分类<NativeSelect aria-label="所属根分类" value={editor.rootId === null ? 'direct' : String(editor.rootId)} disabled={mutation.isPending} onChange={event => setEditor({ ...editor, rootId: event.target.value === 'direct' ? null : Number(event.target.value) })}><option value="direct">直接分组（无父分类）</option>{roots.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</NativeSelect></label>}
+        {editor.kind === 'child' && <section aria-label="分组结构调整预览" className="my-3 rounded-lg border p-3 text-sm">
+          <p>{editedGroup ? `${channelGroupPath(editedGroup, roots)} → ` : '新建：'}{editedPath}</p>
+          {structureChanged && <p>确认后只调整这个分组的父分类；分组 ID、订阅成员和其他用户保持不变，原栏目不会自动删除。</p>}
+        </section>}
         {mutation.isError && <p role="alert" className="workspace-error">保存请求未确认成功。结果可能已写入，请先刷新层级确认，再决定是否重试。</p>}
         {mutation.isPending && <p role="status" className="workspace-caption">正在保存，请等待完成后关闭。</p>}
-        <footer className="workspace-modal-actions"><Button type="button" variant="outline" className="workspace-button secondary" disabled={mutation.isPending} onClick={closeModal}>{mutation.isError ? '关闭编辑' : '取消'}</Button><Button className="workspace-button" disabled={!writable || !editor.name.trim()}>{mutation.isPending ? '保存中…' : '保存'}</Button></footer></form>
+        <footer className="workspace-modal-actions"><Button type="button" variant="outline" className="workspace-button secondary" disabled={mutation.isPending} onClick={closeModal}>{mutation.isError ? '关闭编辑' : '取消'}</Button><Button className="workspace-button" disabled={!writable || !editor.name.trim()}>{mutation.isPending ? '保存中…' : structureChanged ? '确认结构调整' : '保存'}</Button></footer></form>
     </WorkspaceModal>}
     {deleting && <WorkspaceModal title={deleting.kind === 'root' ? '删除空根分类' : '删除子分组'} busy={mutation.isPending} onClose={closeModal}><p>{deleting.kind === 'root' ? `删除空根分类“${deleting.row.name}”？` : `删除“${channelGroupPath(deleting.row, roots)}”子分组？频道订阅与其他分组均会保留。`}</p>
       {mutation.isError && <p role="alert" className="workspace-error">删除请求未确认成功。请先刷新层级确认结果，再决定是否重试。</p>}

@@ -119,7 +119,7 @@ def test_same_child_in_other_root_is_explained_and_never_moved(people):
     child = ChannelGroup.objects.create(user=a, root=root, name='AI / 大模型')
     result = preview(a)
     assert result.data['group_plan'][PATH]['action'] == 'conflict'
-    assert '其他栏目' in result.data['group_plan'][PATH]['reason']
+    assert '父分类不同' in result.data['group_plan'][PATH]['reason']
     response = client(a).post('/api/me/rss-imports/confirm/', confirmation(result, group_map={PATH: 'auto'}), format='json')
     assert response.status_code == 400
     assert ChannelGroupRoot.objects.count() == 1

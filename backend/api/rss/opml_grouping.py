@@ -119,57 +119,62 @@ def group_plan(user, labels):
     paths = {}
     for label in labels:
         parts = _group_path_parts(label)
-        paths[label] = ('OPML 导入', parts[0]) if len(parts) == 1 else parts
+        paths[label] = parts
     child_roots = {}
     for parts in paths.values():
-        if len(parts) == 2:
-            child_roots.setdefault(parts[1], set()).add(parts[0])
+        if len(parts) in (1, 2):
+            child_roots.setdefault(parts[-1], set()).add(parts[0] if len(parts) == 2 else None)
     result = {}
     for label, parts in paths.items():
         reason = ''
-        if len(parts) != 2:
+        root_name = parts[0] if len(parts) == 2 else None
+        if len(parts) not in (1, 2):
             reason = '超过两级层级，请手动选择目标分组'
         elif any(not 1 <= len(name.strip()) <= 40 or name != name.strip() or
                  any(ord(c) < 32 or ord(c) == 127 for c in name) for name in parts):
             reason = '组名须为1–40字符且无首尾空格或控制字符，请手动映射'
-        elif len(child_roots[parts[1]]) > 1:
+        elif len(child_roots[parts[-1]]) > 1:
             reason = '文件内同名子分组位于不同栏目，请手动映射'
         child = children.get(parts[-1])
-        if not reason and child and child.root.name != parts[0]:
-            reason = '已有同名子分组位于其他栏目，不会移动，请手动映射'
-        result[label] = {'root_name': parts[0], 'name': parts[-1],
+        if not reason and child and (child.root.name if child.root_id else None) != root_name:
+            reason = '已有同名分组的父分类不同，不会移动；请手动映射，或在分组管理预览确认结构调整'
+        result[label] = {'root_name': root_name, 'name': parts[-1],
                          'action': 'conflict' if reason else ('reuse' if child else 'create'),
                          'group_id': child.pk if child and not reason else None,
-                         'create_root': parts[0] not in roots, 'reason': reason}
+                         'create_root': root_name is not None and root_name not in roots, 'reason': reason}
     return result
 
 
 def resolve_auto_groups(user, labels, plan):
+    if not labels:
+        return {}
     if any(label not in plan or plan[label]['action'] == 'conflict' for label in labels):
         raise ValidationError('自动分组存在冲突，请手动映射或保留未分组。')
     paths = [plan[label] for label in labels]
     roots = {root.name: root for root in ChannelGroupRoot.objects.filter(user=user)}
     groups = {group.name: group for group in ChannelGroup.objects.filter(user=user)}
-    if len(roots) + len({p['root_name'] for p in paths} - roots.keys()) > 40:
+    if len(roots) + len({p['root_name'] for p in paths if p['root_name'] is not None} - roots.keys()) > 40:
         raise ValidationError('每个账号最多创建 40 个根分类，请减少所选分组。')
     if len(groups) + len({p['name'] for p in paths} - groups.keys()) > 200:
         raise ValidationError('每个账号最多创建 200 个子分组，请减少所选分组。')
-    resolved, touched = {}, set()
+    resolved, touched, created = {}, set(), False
     for label in sorted(labels):
         path = plan[label]
         root = roots.get(path['root_name'])
-        if root is None:
+        if root is None and path['root_name'] is not None:
             root = ChannelGroupRoot.objects.create(user=user, name=path['root_name'])
             roots[root.name] = root
         group = groups.get(path['name'])
         if group is None:
             group = ChannelGroup.objects.create(user=user, root=root, name=path['name'])
             groups[group.name] = group
-            touched.add(root.pk)
-        if group.root_id != root.pk:
+            created = True
+            if root:
+                touched.add(root.pk)
+        if group.root_id != (root.pk if root else None):
             raise RssConflict('分组层级已变化，请重新预览。')
         resolved[label] = group.pk
-    if touched:
+    if created:
         record_group_structure_change(user, root_ids=touched)
     return resolved
 

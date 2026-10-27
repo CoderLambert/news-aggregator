@@ -21,8 +21,8 @@ export function ModelCombobox({ label, options, value, onChange, disabled = fals
   }}>
     <Popover.Trigger asChild>
       <Button ref={trigger} type="button" variant="outline" role="combobox" aria-label={label} aria-expanded={open} aria-controls={id}
-        disabled={disabled} className="h-10 w-full min-w-0 justify-between font-normal">
-        <span className="truncate" title={selected?.label}>{selected?.label ?? placeholder}</span><ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
+        disabled={disabled} className={wrapLabels ? 'h-auto min-h-10 w-full min-w-0 justify-between font-normal' : 'h-10 w-full min-w-0 justify-between font-normal'}>
+        <span className={wrapLabels ? 'min-w-0 flex-1 whitespace-normal break-words text-left [overflow-wrap:anywhere]' : 'truncate'} title={selected?.label}>{selected?.label ?? placeholder}</span><ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" />
       </Button>
     </Popover.Trigger>
     <Popover.Portal container={container}><Popover.Content onEscapeKeyDown={event => event.stopPropagation()} align="start" sideOffset={6} collisionPadding={16}

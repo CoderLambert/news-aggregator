@@ -175,7 +175,7 @@ def batch_data(batch, *, include_items=True):
         labels = sorted({group for item in items for group in item['groups']})
         group_paths = {key: _group_path_parts(key) for key in labels}
         owned_paths = {
-            _group_path_key((group.root.name, group.name)): group.pk
+            _group_path_key((group.root.name, group.name) if group.root_id else (group.name,)): group.pk
             for group in ChannelGroup.objects.filter(
                 user=batch.user,
             ).select_related('root')
@@ -205,7 +205,7 @@ def preview(user, raw, filename='subscriptions.opml', *, organize_existing=False
     if not rows:
         raise ValidationError('没有可预览的已有未分组订阅。')
     organizable_ids = list(ChannelSubscription.objects.filter(user=user, groups__isnull=True).values_list('pk', flat=True)) if organize_existing else []
-    options = {'organize_existing': organize_existing, 'organization_only': organization_only,
+    options = {'grouping_schema': 2, 'organize_existing': organize_existing, 'organization_only': organization_only,
                'grouping_snapshot': grouping_snapshot(user),
                'group_plan': group_plan(user, {label for row in rows for label in row['groups']})}
     filename = ''.join(c for c in str(filename).replace('\\', '/').rsplit('/', 1)[-1] if c.isprintable())[:255] or 'subscriptions.opml'
@@ -278,7 +278,7 @@ def confirm(user, data):
         elif (isinstance(value, dict) and set(value) == {'create', 'root_id'}
                 and isinstance(value['create'], str)
                 and 1 <= len(value['create'].strip()) <= 40
-                and type(value['root_id']) is int and value['root_id'] > 0):
+                and (value['root_id'] is None or type(value['root_id']) is int and value['root_id'] > 0)):
             name = value['create'].strip()
             if any(ord(character) < 32 or ord(character) == 127 for character in name):
                 raise ValidationError('新子分组名称不能包含控制字符。')
@@ -304,9 +304,11 @@ def confirm(user, data):
             batch.options.get('grouping_snapshot') != grouping_snapshot(user)):
         raise RssConflict('订阅、分组或目录快照已变化，请重新预览。')
     auto_labels = {label for label, value in normalized.items() if value == 'auto'}
+    if auto_labels and batch.options.get('grouping_schema') != 2:
+        raise RssConflict('分组层级契约已更新，请重新预览后确认。')
     auto_resolved = resolve_auto_groups(user, auto_labels, batch.options.get('group_plan', {}))
     root_ids = {
-        value['root_id'] for value in normalized.values() if isinstance(value, dict)
+        value['root_id'] for value in normalized.values() if isinstance(value, dict) and value['root_id'] is not None
     }
     roots = {
         root.pk: root for root in ChannelGroupRoot.objects.filter(
@@ -337,7 +339,7 @@ def confirm(user, data):
             group = created_groups.get(value['create'])
             if group is None:
                 group = ChannelGroup.objects.create(
-                    user=user, root=roots[value['root_id']], name=value['create'],
+                    user=user, root=roots.get(value['root_id']), name=value['create'],
                 )
                 created_groups[value['create']] = group
                 touched_roots.add(group.root_id)
@@ -347,7 +349,7 @@ def confirm(user, data):
             except ChannelGroup.DoesNotExist:
                 raise Http404 from None
         resolved[label] = group.pk
-    if touched_roots:
+    if created_groups:
         record_group_structure_change(user, root_ids=touched_roots)
     for item in items:
         item.selected_group_ids = sorted({resolved[label] for label in item.groups if label in resolved})
@@ -511,13 +513,15 @@ def export_opml(user):
             for group in destinations:
                 parent = body
                 if group is not None:
-                    if group.root_id not in root_outlines:
-                        root_outlines[group.root_id] = ET.SubElement(
-                            body, 'outline', text=group.root.name, title=group.root.name,
-                        )
+                    if group.root_id:
+                        if group.root_id not in root_outlines:
+                            root_outlines[group.root_id] = ET.SubElement(
+                                body, 'outline', text=group.root.name, title=group.root.name,
+                            )
+                        parent = root_outlines[group.root_id]
                     if group.pk not in child_outlines:
                         child_outlines[group.pk] = ET.SubElement(
-                            root_outlines[group.root_id], 'outline',
+                            parent, 'outline',
                             text=group.name, title=group.name,
                         )
                     parent = child_outlines[group.pk]

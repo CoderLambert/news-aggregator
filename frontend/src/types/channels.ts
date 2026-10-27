@@ -13,7 +13,7 @@ export interface ChannelGroupRoot {
   id: number; name: string; version: number; child_count: number; created_at: string; updated_at: string
 }
 export interface ChannelGroup {
-  id: number; root_id: number; name: string; source_ids: number[]; version: number; created_at: string; updated_at: string
+  id: number; root_id: number | null; name: string; source_ids: number[]; version: number; created_at: string; updated_at: string
 }
 export const newsScopes: NewsScope[] = ['all', 'subscribed', 'ungrouped', 'group']
 function numberIds(value: unknown): number[] {
@@ -82,7 +82,7 @@ export function parseRoots(value: unknown): ChannelGroupRoot[] {
 export function parseGroups(value: unknown): ChannelGroup[] {
   if (!Array.isArray(value)) throw new TypeError('Invalid groups')
   const groups = value.map(item => {
-    if (!isRecord(item) || !positiveId(item.id) || !positiveId(item.root_id) ||
+    if (!isRecord(item) || !positiveId(item.id) || (item.root_id !== null && !positiveId(item.root_id)) ||
         !validName(item.name) || !validVersion(item.version) ||
         !validTimestamp(item.created_at) || !validTimestamp(item.updated_at)) {
       throw new TypeError('Invalid group')
@@ -97,12 +97,14 @@ export function validateHierarchy(roots: ChannelGroupRoot[], groups: ChannelGrou
   const rootIds = new Set(roots.map(root => root.id))
   const counts = new Map(roots.map(root => [root.id, 0]))
   for (const group of groups) {
+    if (group.root_id === null) continue
     if (!rootIds.has(group.root_id)) return false
     counts.set(group.root_id, (counts.get(group.root_id) ?? 0) + 1)
   }
   return roots.every(root => counts.get(root.id) === root.child_count)
 }
 export function channelGroupPath(group: ChannelGroup, roots: ChannelGroupRoot[]): string {
+  if (group.root_id === null) return group.name
   const root = roots.find(item => item.id === group.root_id)
   if (!root) throw new TypeError('Invalid group topology')
   return `${root.name} / ${group.name}`

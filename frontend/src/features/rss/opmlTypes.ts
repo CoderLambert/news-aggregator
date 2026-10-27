@@ -9,7 +9,7 @@ export interface ImportSummary {
 export interface ImportBatch extends ImportSummary {
   preview_token?: string; items: ImportItem[]; groups: string[]
   organize_existing?: boolean; organization_only?: boolean
-  group_plan?: Record<string, { root_name: string; name: string; action: 'create' | 'reuse' | 'conflict'; group_id: number | null; create_root: boolean; reason: string }>
+  group_plan?: Record<string, { root_name: string | null; name: string; action: 'create' | 'reuse' | 'conflict'; group_id: number | null; create_root: boolean; reason: string }>
   group_matches?: Record<string, number>; group_labels?: Record<string, string>; group_names?: Record<string, string>
 }
 export const batchKey = (viewer: number, id: string | null) => ['private', 'rss-import', viewer, id] as const

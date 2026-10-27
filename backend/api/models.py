@@ -1272,7 +1272,8 @@ class ChannelGroupRoot(models.Model):
 
 class ChannelGroup(models.Model):
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='channel_groups')
-    root = models.ForeignKey(ChannelGroupRoot, on_delete=models.PROTECT, related_name='children')
+    # Null means a direct personal group, not an implicit import container.
+    root = models.ForeignKey(ChannelGroupRoot, null=True, blank=True, on_delete=models.PROTECT, related_name='children')
     name = models.CharField(max_length=40)
     subscriptions = models.ManyToManyField(ChannelSubscription, related_name='groups', through='ChannelGroupMember')
     version = models.PositiveBigIntegerField(default=1)

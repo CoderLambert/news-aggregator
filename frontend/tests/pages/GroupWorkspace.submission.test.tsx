@@ -147,10 +147,37 @@ it('restores a child deep link and reparents with the child structural version',
   expect(await screen.findByRole('heading', { name: 'Personal / Existing' })).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '编辑子分组' }))
   fireEvent.change(screen.getByRole('combobox', { name: '所属根分类' }), { target: { value: '10' } })
-  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  expect(screen.getByRole('region', { name: '分组结构调整预览' })).toHaveTextContent('Personal / Existing → Research / Existing')
+  expect(updateChannelGroup).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '确认结构调整' }))
   await waitFor(() => expect(updateChannelGroup).toHaveBeenCalledWith(1, {
     name: 'Existing', root_id: 10, expected_version: 1,
   }))
+})
+
+it('previews a historical group becoming direct and sends null without replacing its ID or members', async () => {
+  vi.mocked(updateChannelGroup).mockResolvedValue({ id: 1, root_id: null, name: 'Existing' })
+  renderWorkspace('/channels/groups?root=9&group=1')
+  fireEvent.click(await screen.findByRole('button', { name: '编辑子分组' }))
+  fireEvent.change(screen.getByRole('combobox', { name: '所属根分类' }), { target: { value: 'direct' } })
+  expect(screen.getByRole('region', { name: '分组结构调整预览' })).toHaveTextContent('Personal / Existing → Existing')
+  expect(screen.getByText(/分组 ID、订阅成员和其他用户保持不变/)).toBeInTheDocument()
+  expect(updateChannelGroup).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '确认结构调整' }))
+  await waitFor(() => expect(updateChannelGroup).toHaveBeenCalledWith(1, { name: 'Existing', root_id: null, expected_version: 1 }))
+})
+
+it('opens a real direct group deep link even with no roots', async () => {
+  hierarchy.roots = []
+  hierarchy.groups = [{ id: 1, root_id: null, name: '🌐 科技媒体与开源生态深度阅读', source_ids: [], version: 1 }]
+  renderWorkspace('/channels/groups?group=1')
+  expect(await screen.findByRole('heading', { name: '🌐 科技媒体与开源生态深度阅读' })).toBeInTheDocument()
+  expect(screen.queryByText('还没有分组')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /^新建分组$/ }))
+  fireEvent.change(screen.getByRole('textbox', { name: '分组名称' }), { target: { value: '🎨 前端 & 设计' } })
+  vi.mocked(createChannelGroup).mockResolvedValue({ id: 2, root_id: null })
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await waitFor(() => expect(createChannelGroup).toHaveBeenCalledWith('🎨 前端 & 设计', null))
 })
 
 it('falls back from an invalid child deep link to the owned root without aggregate reading controls', async () => {

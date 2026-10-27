@@ -80,6 +80,24 @@ describe('personal OPML workflow', () => {
     })))
   })
 
+  it('previews single-level OPML as a direct group with no invented root', async () => {
+    const label = '🌐 科技媒体与开源生态深度阅读'
+    request.mockResolvedValueOnce({ ...batch, groups: [label], group_plan: { [label]: {
+      root_name: null, name: label, action: 'create', group_id: null, create_root: false, reason: '',
+    } }, items: [{ ...batch.items[0], groups: [label] }] })
+    setup()
+    fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'flat.opml')] } })
+    fireEvent.click(screen.getByRole('button', { name: '预览文件' }))
+    expect(await screen.findByRole('combobox', { name: label + '映射分组' })).toHaveValue('auto')
+    expect(screen.getByRole('option', { name: '新建分组：' + label })).toBeInTheDocument()
+    expect(screen.queryByText('OPML 导入 / ' + label)).not.toBeInTheDocument()
+    expect(request).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 1 项' }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({
+      body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { [label]: 'auto' } },
+    })))
+  })
+
   it('previews organization without a file and retains unknown subscriptions unselected', async () => {
     const grouped = { ...batch, organization_only: true, organize_existing: true, groups: [],
       items: [{ ...batch.items[0], groups: [], outcome: 'already_subscribed', can_organize: false }],

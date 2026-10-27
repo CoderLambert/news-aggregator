@@ -9,7 +9,7 @@ import OpmlHistory from './OpmlHistory'
 import { batchKey, importStatusText as statusText, importOutcomeText, invalidateImportEffects, type ImportBatch } from './opmlTypes'
 import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot } from '@/types/channels'
 
-interface ConfirmRequest { preview_token: string; selected_ids: string[]; group_map: Record<string, number | 'auto' | { create: string; root_id: number } | null> }
+interface ConfirmRequest { preview_token: string; selected_ids: string[]; group_map: Record<string, number | 'auto' | { create: string; root_id: number | null } | null> }
 interface RetryRequest { batchId: string; selected_ids: string[] }
 interface OpmlDialogProps { viewer: number; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; onClose: () => void }
 const validBatchId = (value: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
@@ -102,7 +102,7 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
       group_map: Object.fromEntries(Object.entries(groupMap).map(([key, value]) => {
         const childName = preview.data?.group_names?.[key] ?? (key.split(' / ').at(-1) ?? key)
         if (value === 'auto') return [key, 'auto']
-        if (value.startsWith('new:')) return [key, { create: childName.slice(0, 40), root_id: Number(value.slice(4)) }]
+        if (value.startsWith('new:')) return [key, { create: childName.slice(0, 40), root_id: value === 'new:direct' ? null : Number(value.slice(4)) }]
         return [key, value ? Number(value) : null]
       })),
     })
@@ -117,7 +117,7 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
       preview.reset(); confirm.reset(); retry.reset(); setSelected([]); setGroupMap({}); setBatchId(id); setResumeId(id); setShowHistory(false)
     }} /> : <>
     <p className="workspace-muted">上传 OPML 文件，先检查订阅与分组，再确认导入。最多500个订阅，文件不超过1MiB。文件会保存到仅自己可见的导入历史。502项公共目录不是全部个人订阅，请拆分文件或在目录中按需选择；账号订阅上限不变。</p>
-    <p className="workspace-muted">按明确的两级路径自动创建或复用个人组；单层目录放入「OPML 导入」栏目。不会调用 AI，不移动已有手工归组。无明确分类的保留未分组。</p>
+    <p className="workspace-muted">单层 OPML 直接创建或复用个人分组；只有文件本来有两级分类时才保留父子路径。不会调用 AI，不移动已有手工归组。无明确分类的保留未分组。</p>
     <label className="workspace-resolved-choice"><Input type="checkbox" className="size-4 shrink-0" checked={organizeExisting} disabled={busy} onChange={event => { setOrganizeExisting(event.target.checked); resetPreview() }} />同时整理已有未分组订阅（仅按明确 OPML / 本地目录关联）</label>
     <Button type="button" variant="outline" disabled={busy} onClick={() => { resetPreview(); preview.mutate(null) }}>仅预览整理已有未分组</Button>
     <form className="workspace-inline-form" onSubmit={event => {
@@ -193,7 +193,8 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
         return <label className="workspace-resolved-choice" key={key}>{label}
           <NativeSelect aria-label={label + '映射分组'} disabled={busy || confirm.isError} value={groupMap[key] ?? ''} onChange={event => setGroupMap(current => ({ ...current, [key]: event.target.value }))}>
             <option value="">不加入分组</option>
-            {plan && plan.action !== 'conflict' && <option value="auto">{plan.action === 'reuse' ? '复用' : plan.create_root ? '新建栏目及子组' : '新建子组'}：{plan.root_name} / {plan.name}</option>}
+            {plan && plan.action !== 'conflict' && <option value="auto">{plan.action === 'reuse' ? '复用' : plan.create_root ? '新建栏目及子组' : '新建分组'}：{plan.root_name === null ? plan.name : `${plan.root_name} / ${plan.name}`}</option>}
+            <option value="new:direct">直接创建分组「{childName.slice(0, 40)}」</option>
             {roots.map(root => <option key={'new:' + root.id} value={'new:' + root.id}>在「{root.name}」下创建「{childName.slice(0, 40)}」</option>)}
             {groups.map(group => <option key={group.id} value={group.id}>{channelGroupPath(group, roots)}</option>)}
           </NativeSelect>
