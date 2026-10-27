@@ -17,6 +17,7 @@ from django.core import signing
 from django.db import transaction
 
 from .directory_models import FeedDirectoryEntry, FeedDirectorySnapshot
+from .catalog_taxonomy import matches_selection, paths_for_tags, taxonomy_counts, validate_selection
 
 SCHEMA_VERSION = 1
 MAX_BYTES = 8 * 1024 * 1024
@@ -49,7 +50,7 @@ def _strings(value, field, maximum=64):
 
 def _object(value, field):
     if not isinstance(value, dict):
-        raise DirectoryValidationError(f'invalid {field}')
+        raise DirectoryValidationError('invalid ' + field)
     return value
 
 
@@ -205,12 +206,12 @@ def _unique_object(pairs):
     return result
 
 
-def import_snapshot(payload, *, expected_checksum):
-    """Validate pinned UTF-8 JSON bytes, then activate all entries atomically.
+def validate_snapshot(payload, *, expected_checksum):
+    """Validate pinned UTF-8 JSON bytes without database or network writes.
 
-    Optional collections contain additional independently attributed sources; all
-    collections are validated and swapped together. No implicit merging with the
-    previous snapshot or user sources occurs.
+    Optional collections contain additional independently attributed sources.
+    Return normalized rows for either read-only planning or atomic publication.
+    No implicit merging with previous snapshots or user sources occurs.
     """
     if not isinstance(payload, bytes) or not 0 < len(payload) <= MAX_BYTES:
         raise DirectoryValidationError('snapshot byte limit exceeded')
@@ -253,6 +254,12 @@ def import_snapshot(payload, *, expected_checksum):
                 raise DirectoryValidationError('entry limit exceeded')
     if not validated:
         raise DirectoryValidationError('empty snapshot')
+    return checksum, source, validated, origins
+
+
+def import_snapshot(payload, *, expected_checksum):
+    """Validate a complete snapshot, then atomically activate it (not an append)."""
+    checksum, source, validated, origins = validate_snapshot(payload, expected_checksum=expected_checksum)
     with transaction.atomic():
         # SQLite serializes this first write. The DB constraint also prevents two
         # simultaneous publishers from leaving more than one active snapshot.
@@ -272,8 +279,20 @@ def import_snapshot(payload, *, expected_checksum):
 
 
 def import_pinned_seed():
+    # A daily/startup seed refresh must not undo an operator publication/rollback.
+    current = FeedDirectorySnapshot.objects.filter(active=True).first()
+    if current and current.provenance.get('activation_policy') == 'manual':
+        return current
     lock = json.loads(SEED_PATH.with_suffix('.lock.json').read_text())
-    return import_snapshot(SEED_PATH.read_bytes(), expected_checksum=lock['sha256'])
+    payload = SEED_PATH.read_bytes()
+    with transaction.atomic():
+        # Recheck after taking the SQLite writer reservation: a catalog may have
+        # been published while local seed bytes were read.
+        FeedDirectorySnapshot.objects.filter(active=True).update(active=True)
+        current = FeedDirectorySnapshot.objects.filter(active=True).first()
+        if current and current.provenance.get('activation_policy') == 'manual':
+            return current
+        return import_snapshot(payload, expected_checksum=lock['sha256'])
 
 
 def _fold(value):
@@ -306,7 +325,7 @@ def directory_category_ids(tags):
             if any(tag.endswith(name) for tag in tags for name in names)}
 
 
-def search_directory(q='', *, limit=20, cursor=None, category=''):
+def search_directory(q='', *, limit=20, cursor=None, category='', section='', group='', language='', region=''):
     """Return local metadata only; T20 adds authorized user state/previews.
 
     `subscribed=None` means unknown until user-aware enrichment. Empty cached
@@ -318,6 +337,14 @@ def search_directory(q='', *, limit=20, cursor=None, category=''):
         raise DirectoryValidationError('limit must be between 1 and 50')
     if category not in {'', *(row[0] for row in DIRECTORY_CATEGORIES)}:
         raise DirectoryValidationError('invalid category')
+    try:
+        validate_selection(section, group)
+    except ValueError as exc:
+        raise DirectoryValidationError(str(exc)) from None
+    for label, value in (('language', language), ('region', region)):
+        if not isinstance(value, str) or len(value) > 32 or any(ord(c) < 32 for c in value):
+            raise DirectoryValidationError('invalid ' + label)
+    filters = {'section': section, 'group': group, 'language': language, 'region': region}
     query = _fold(q)
     snapshot = FeedDirectorySnapshot.objects.filter(active=True).first()
     version = snapshot.checksum if snapshot else None
@@ -327,14 +354,25 @@ def search_directory(q='', *, limit=20, cursor=None, category=''):
             state = signing.loads(cursor, salt='rss-directory-v1', max_age=86400)
             if state['snapshot'] != version or state['query'] != query or state.get('category', '') != category or state.get('order_version') != 2:
                 raise ValueError
+            # Old v2 cursors remain valid only when all added filters are empty.
+            if any(state.get(key, '') != value for key, value in filters.items()):
+                raise ValueError
             offset = state['offset']
             if type(offset) is not int or offset < 0 or offset > MAX_ENTRIES:
                 raise ValueError
         except (signing.BadSignature, KeyError, TypeError, ValueError):
             raise DirectoryCursorError('invalid or stale directory cursor') from None
     matches = []
+    entries = list(snapshot.entries.filter(visibility='public')) if snapshot else []
+    sections = taxonomy_counts([
+        {'public_url': entry.public_url, 'tags': entry.tags, 'kind': entry.kind} for entry in entries
+    ])
     if snapshot:
-        for entry in snapshot.entries.filter(visibility='public'):
+        for entry in entries:
+            if not matches_selection(entry.tags, section, group):
+                continue
+            if (language and entry.language != language) or (region and entry.region != region):
+                continue
             if category and category not in directory_category_ids(entry.tags):
                 continue
             name, url = _fold(entry.name), _fold(entry.public_url)
@@ -352,10 +390,12 @@ def search_directory(q='', *, limit=20, cursor=None, category=''):
     fields = ('name', 'description', 'language', 'region', 'tags', 'origin', 'kind',
               'public_url', 'required_parameters', 'capability_requirements', 'verified_at')
     results = [dict(id=str(entry.entry_id), **{field: getattr(entry, field) for field in fields},
-                    subscribed=None, cached_articles=[], recommended=entry.name in FEATURED_CHANNELS) for _, entry in page]
+                    subscribed=None, cached_articles=[], recommended=entry.name in FEATURED_CHANNELS,
+                    catalog_paths=paths_for_tags(entry.tags)) for _, entry in page]
     next_cursor = None
     if offset + limit < len(matches):
-        next_cursor = signing.dumps({'snapshot': version, 'query': query, 'category': category, 'order_version': 2, 'offset': offset + limit},
+        next_cursor = signing.dumps({'snapshot': version, 'query': query, 'category': category, 'order_version': 2, 'offset': offset + limit, **filters},
                                     salt='rss-directory-v1', compress=True)
     return {'results': results, 'next_cursor': next_cursor, 'snapshot_version': version,
+            'sections': sections, 'total': len(matches), 'count_scope': 'public_catalog_unique_feed_urls',
             'categories': [{'id': key, 'name': label} for key, label, _tags in DIRECTORY_CATEGORIES]}

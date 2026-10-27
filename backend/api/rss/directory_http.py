@@ -15,7 +15,9 @@ class DirectoryView(RssAPIView):
         try:
             data = search_directory(request.query_params.get('q', ''),
                 limit=int(request.query_params.get('limit', '20')), cursor=request.query_params.get('cursor'),
-                category=request.query_params.get('category', ''))
+                category=request.query_params.get('category', ''),
+                section=request.query_params.get('section', ''), group=request.query_params.get('group', ''),
+                language=request.query_params.get('language', ''), region=request.query_params.get('region', ''))
         except (DirectoryCursorError, DirectoryValidationError, ValueError):
             raise ValidationError('目录查询无效或已过期，请重新搜索。') from None
         try:

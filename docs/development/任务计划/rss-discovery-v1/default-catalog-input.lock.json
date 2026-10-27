@@ -1,0 +1,149 @@
+{
+  "input": "NEWSHUB-CURATED-502-ADMIN-CATALOG.opml",
+  "sha256": "22621f6305edb27f3a34b840b72add5d7a7a2ca536cbbbd68b2a8fa8cdb034aa",
+  "feeds": 502,
+  "sections": [
+    {
+      "key": "tech",
+      "label": "技术",
+      "count": 228,
+      "groups": [
+        {
+          "key": "ai-llm",
+          "label": "AI / 大模型",
+          "count": 24
+        },
+        {
+          "key": "frontend",
+          "label": "前端开发",
+          "count": 25
+        },
+        {
+          "key": "backend-architecture",
+          "label": "后端与架构",
+          "count": 25
+        },
+        {
+          "key": "open-source-ecosystem",
+          "label": "开源生态",
+          "count": 23
+        },
+        {
+          "key": "devops-cloud",
+          "label": "DevOps / 云原生",
+          "count": 30
+        },
+        {
+          "key": "network-security",
+          "label": "网络与安全",
+          "count": 22
+        },
+        {
+          "key": "devtools",
+          "label": "开发工具",
+          "count": 27
+        },
+        {
+          "key": "bigtech-engineering",
+          "label": "大厂技术官方",
+          "count": 28
+        },
+        {
+          "key": "open-source-trends",
+          "label": "开源趋势",
+          "count": 24
+        }
+      ]
+    },
+    {
+      "key": "business",
+      "label": "商业",
+      "count": 71,
+      "groups": [
+        {
+          "key": "technology-business",
+          "label": "科技商业",
+          "count": 24
+        },
+        {
+          "key": "startup-product",
+          "label": "创业与产品",
+          "count": 21
+        },
+        {
+          "key": "investment-market",
+          "label": "投资与市场",
+          "count": 26
+        }
+      ]
+    },
+    {
+      "key": "industry",
+      "label": "行业",
+      "count": 110,
+      "groups": [
+        {
+          "key": "healthcare",
+          "label": "医疗健康",
+          "count": 23
+        },
+        {
+          "key": "energy",
+          "label": "能源",
+          "count": 20
+        },
+        {
+          "key": "automotive",
+          "label": "汽车",
+          "count": 24
+        },
+        {
+          "key": "consumer-electronics",
+          "label": "消费电子",
+          "count": 23
+        },
+        {
+          "key": "semiconductors",
+          "label": "芯片与半导体",
+          "count": 20
+        }
+      ]
+    },
+    {
+      "key": "news",
+      "label": "新闻时事",
+      "count": 69,
+      "groups": [
+        {
+          "key": "world-news",
+          "label": "国际新闻",
+          "count": 23
+        },
+        {
+          "key": "china-news",
+          "label": "国内新闻",
+          "count": 24
+        },
+        {
+          "key": "policy-regulation",
+          "label": "政策与监管",
+          "count": 22
+        }
+      ]
+    },
+    {
+      "key": "reading",
+      "label": "人文与阅读",
+      "count": 24,
+      "groups": [
+        {
+          "key": "longreads-stories",
+          "label": "深度阅读与故事",
+          "count": 24
+        }
+      ]
+    }
+  ],
+  "scope": "offline OPML + unchanged upstream URL syntax policy; no DNS/HTTP/Django/Miniflux integration",
+  "status": "offline_input_check_passed"
+}
