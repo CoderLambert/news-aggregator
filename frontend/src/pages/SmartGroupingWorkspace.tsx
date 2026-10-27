@@ -34,7 +34,13 @@ const errorMessages: Record<string, string> = {
   incomplete_output: '模型返回不完整，未应用任何分组。', worker_interrupted: '任务已中断或结果未知，不会自动重发；确认后可显式重新预览。',
   invalid_output: '模型输出格式无效，未修改你的分组。', invalid_topic: '模型返回了未允许的主题。',
   invalid_group: '模型返回了无效或过多的分组建议，未修改你的分组。',
+  invalid_hierarchy: '模型返回了无效的层级建议，请检查现有分组后重新生成。',
   invalid_source: '模型返回了未知频道。', expired: '任务已过期，请重新生成。',
+}
+
+function hierarchyFailureMessage(errorCode: string) {
+  return Object.hasOwn(errorMessages, errorCode) ? errorMessages[errorCode]
+    : '任务未完成，请刷新状态后检查设置；不会自动重发模型请求。'
 }
 
 function useClassificationModel(viewer: number, enabled: boolean) {
@@ -129,21 +135,23 @@ function HierarchyOrganizer({ viewer, roots, groups }: { viewer: number; roots: 
       {create.isError && <div role="alert" className="workspace-error"><p>{workspaceError(create.error)} 重试会复用同一请求编号。</p><Button variant="ghost" onClick={() => { setRequest(null); create.reset() }}>放弃本次请求</Button></div>}
     </section>
     {notice && <p role="status" className="workspace-notice">{notice}</p>}
-    {activeId && <section className="workspace-panel" aria-label="层级建议"><header className="workspace-panel-heading"><h2>层级建议</h2>{active.data && <Badge variant="outline">{proposalStatus[active.data.status] ?? active.data.status}</Badge>}</header>
+    {activeId && <section className="workspace-panel" aria-label="层级建议"><header className="workspace-panel-heading"><h2>层级建议</h2><div className="workspace-actions">{active.data && <Badge variant="outline">{proposalStatus[active.data.status] ?? active.data.status}</Badge>}
+      <Button type="button" variant="ghost" disabled={busy} onClick={() => { void active.refetch(); void history.refetch() }}>刷新任务状态</Button></div></header>
       {active.isPending && <p role="status">正在读取层级建议…</p>}
       {active.isError && <p role="alert">建议读取失败。<Button variant="outline" onClick={() => void active.refetch()}>重试</Button></p>}
       {change.isError && <p role="alert">{workspaceError(change.error)} 操作结果尚未确认，请重新读取任务状态。</p>}
-      {active.data && ['queued', 'running'].includes(active.data.status) && <p role="status">AI 正在规划层级；任务已保存，可以稍后从记录恢复。</p>}
+      {active.data?.status === 'queued' && <p role="status">任务已保存，等待后台开始处理；尚未生成建议。</p>}
+      {active.data?.status === 'running' && <p role="status">AI 正在分析层级；完成后需要你确认才会修改分组。</p>}
       {active.data?.status === 'ready' && active.data.target === 'hierarchy' && <HierarchyReview key={active.data.id} rows={active.data.result as HierarchyProposalRow[]} roots={roots} groups={groups} busy={busy || change.isError}
         onApply={rows => change.mutate({ action: 'apply', body: { rows } })} />}
       {active.data && ['queued', 'running', 'ready'].includes(active.data.status) && <Button variant="outline" disabled={busy || change.isError} onClick={() => change.mutate({ action: 'cancel' })}>取消任务</Button>}
       {active.data?.status === 'applied' && <><p>层级移动已应用；后续人工修改不会被撤销覆盖。</p><Button variant="outline" disabled={busy || change.isError} onClick={() => change.mutate({ action: 'undo' })}>撤销未被改动的移动</Button></>}
       {active.data?.status === 'undone' && <p>可撤销的层级移动已恢复；人工改动的项目已跳过。</p>}
-      {active.data?.status === 'failed' && <p role="alert">层级任务未完成，未写入任何建议。</p>}
+      {active.data?.status === 'failed' && <div role="alert"><p>{hierarchyFailureMessage(active.data.error_code)}</p><p>未修改你的分组。重新生成需要再次勾选模型额度授权。</p></div>}
     </section>}
     <section className="workspace-panel"><header className="workspace-panel-heading"><h2>层级整理记录</h2><Button variant="ghost" disabled={history.isFetching} onClick={() => void history.refetch()}>刷新记录</Button></header>
       {history.isError && <p role="alert">层级记录加载失败。</p>}
-      <ul className="workspace-job-list">{(history.data?.results ?? []).filter(item => item.target === 'hierarchy').map(item => <li key={item.id}><span><strong>AI 层级整理</strong><small>{new Date(item.created_at).toLocaleString()}</small></span><span>{proposalStatus[item.status] ?? item.status}</span>
+      <ul className="workspace-job-list">{(history.data?.results ?? []).filter(item => item.target === 'hierarchy').map(item => <li key={item.id}><span><strong>AI 层级整理</strong><small>{new Date(item.created_at).toLocaleString()}</small></span><span>{proposalStatus[item.status] ?? item.status}{item.status === 'failed' && <small>{hierarchyFailureMessage(item.error_code)}</small>}</span>
         <Button variant="outline" disabled={busy} onClick={() => { setActiveId(item.id); client.setQueryData(workspaceKeys.proposal(viewer, item.id), item) }}>{item.status === 'ready' ? '审核建议' : '查看任务'}</Button></li>)}</ul>
       {!history.isPending && !history.isError && !(history.data?.results ?? []).some(item => item.target === 'hierarchy') && <p className="workspace-muted">还没有层级整理记录。</p>}
     </section>
