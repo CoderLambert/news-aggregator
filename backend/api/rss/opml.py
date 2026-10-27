@@ -33,6 +33,12 @@ class TooLarge(APIException):
     default_code = 'too_large'
 
 
+class FeedLimitExceeded(APIException):
+    status_code = 400
+    default_detail = '个人 OPML 每次最多500个订阅。502项公共目录不是个人订阅，请拆分文件或在目录中按需选择；账号订阅上限不变。'
+    default_code = 'feed_limit_exceeded'
+
+
 _GROUP_PATH_PREFIX = 'opml-path:'
 _GROUP_LABEL_PREFIX = 'opml-label:'
 
@@ -85,7 +91,9 @@ def parse_opml(raw):
         pending.extend((child, depth + 1) for child in element)
     # bytes is deliberate: listparser's string overload can issue HTTP requests.
     feeds = listparser.parse(raw).get('feeds', [])
-    if not feeds or len(feeds) > MAX_FEEDS:
+    if len(feeds) > MAX_FEEDS:
+        raise FeedLimitExceeded
+    if not feeds:
         raise ValidationError('OPML 须包含1–500个订阅。')
     rows, urls = [], {}
     for feed in feeds:
@@ -153,7 +161,8 @@ def batch_data(batch, *, include_items=True):
                       'outcome': outcome, 'next_attempt': next_attempt, 'can_retry': can_retry,
                       'duplicate_count': item.duplicate_count,
                       'operation_id': str(item.operation_id) if item.operation_id else None,
-                      'subscription_id': item.subscription_id})
+                      'subscription_id': item.subscription_id,
+                      'can_organize': bool(str(item.pk) in batch.options.get('organizable_item_ids', []) and item.groups)})
     result = {'id': str(batch.pk), 'status': batch.status, 'expires_at': batch.expires_at,
               'filename': batch.filename, 'file_size': batch.file_size,
               'file_available': bool(batch.file_size), 'created_at': batch.created_at,
@@ -177,27 +186,46 @@ def batch_data(batch, *, include_items=True):
             group_labels={key: ' / '.join(group_paths[key]) for key in labels},
             group_names={key: group_paths[key][-1] for key in labels},
             group_matches={key: owned_paths[key] for key in labels if key in owned_paths},
+            group_plan=batch.options.get('group_plan', {}),
+            organize_existing=batch.options.get('organize_existing', False),
+            organization_only=batch.options.get('organization_only', False),
         )
     return result
 
 
 @sqlite_retry
 @transaction.atomic
-def preview(user, raw, filename='subscriptions.opml'):
-    rows = parse_opml(raw)
+def preview(user, raw, filename='subscriptions.opml', *, organize_existing=False, organization_only=False):
+    from api.rss.opml_grouping import prepare_rows, group_plan, grouping_snapshot
+    rows = [] if organization_only else parse_opml(raw)
     get_user_model().objects.filter(pk=user.pk).update(last_login=F('last_login'))
     if RssImportBatch.objects.filter(user=user, created_at__gte=timezone.now() - timedelta(hours=1)).count() >= 10:
         raise Throttled(detail='导入预览过于频繁，请稍后重试。')
+    rows = prepare_rows(user, rows, organize_existing=organize_existing)
+    if not rows:
+        raise ValidationError('没有可预览的已有未分组订阅。')
+    organizable_ids = list(ChannelSubscription.objects.filter(user=user, groups__isnull=True).values_list('pk', flat=True)) if organize_existing else []
+    options = {'organize_existing': organize_existing, 'organization_only': organization_only,
+               'grouping_snapshot': grouping_snapshot(user),
+               'group_plan': group_plan(user, {label for row in rows for label in row['groups']})}
     filename = ''.join(c for c in str(filename).replace('\\', '/').rsplit('/', 1)[-1] if c.isprintable())[:255] or 'subscriptions.opml'
     batch = RssImportBatch.objects.create(user=user, filename=filename, file_content=raw,
                                         file_size=len(raw), file_hash=sha256(raw).hexdigest(),
-                                        expires_at=timezone.now() + timedelta(minutes=30))
+                                        expires_at=timezone.now() + timedelta(minutes=30), options=options)
     token = signing.dumps({'id': str(batch.pk), 'user': user.pk, 'file_hash': batch.file_hash}, salt=SALT)
     batch.preview_token_hash = sha256(token.encode()).hexdigest()
     batch.save(update_fields=['preview_token_hash'])
     from api.rss.import_scheduler import classify_imports
     known = classify_imports(user, {row['feed_url'] for row in rows})
-    RssImportItem.objects.bulk_create([RssImportItem(batch=batch, outcome=known.get(row['feed_url'], ''), **row) for row in rows])
+    for row in rows:
+        row.setdefault('outcome', known.get(row['feed_url'], ''))
+    import_items = [RssImportItem(batch=batch, **row) for row in rows]
+    RssImportItem.objects.bulk_create(import_items)
+    batch.options = {**options,
+        'existing_item_ids': [str(item.pk) for item in import_items if item.subscription_id],
+        'organizable_item_ids': [str(item.pk) for item in import_items if item.subscription_id in organizable_ids],
+    }
+    batch.save(update_fields=['options'])
     return {**batch_data(batch), 'preview_token': token}
 
 
@@ -225,7 +253,7 @@ def confirm(user, data):
     if payload['user'] != user.pk or batch.expires_at <= timezone.now():
         raise ValidationError('预览已过期或无效。')
     selected, mapping = data['selected_ids'], data['group_map']
-    if not isinstance(selected, list) or not selected or len(selected) > MAX_FEEDS or not isinstance(mapping, dict):
+    if not isinstance(selected, list) or not selected or len(selected) > MAX_FEEDS * 2 or not isinstance(mapping, dict):
         raise ValidationError('请选择有效订阅与分组。')
     try:
         selected = sorted({str(UUID(value)) for value in selected})
@@ -237,12 +265,15 @@ def confirm(user, data):
     known_groups = {group for item in batch.items.all() for group in item.groups}
     if set(mapping) - known_groups:
         raise ValidationError('分组不属于此预览。')
-    selected_labels = {label for item in items for label in item.groups}
+    existing_item_ids = set(batch.options.get('existing_item_ids', []))
+    organizable_item_ids = set(batch.options.get('organizable_item_ids', []))
+    selected_labels = {label for item in items for label in item.groups
+                       if str(item.pk) not in existing_item_ids or str(item.pk) in organizable_item_ids}
     normalized = {}
     for label, value in mapping.items():
         if label not in selected_labels:
             continue
-        if value is None or type(value) is int and value > 0:
+        if value == 'auto' or value is None or type(value) is int and value > 0:
             normalized[label] = value
         elif (isinstance(value, dict) and set(value) == {'create', 'root_id'}
                 and isinstance(value['create'], str)
@@ -256,7 +287,8 @@ def confirm(user, data):
             raise ValidationError('分组映射须为自己的子分组ID、带根分类的新子分组或空值。')
     for item in items:
         selected_groups = {
-            ('new', value['create']) if isinstance(value, dict) else ('existing', value)
+            ('new', value['root_id'], value['create']) if isinstance(value, dict) else
+            ('auto', batch.options.get('group_plan', {}).get(label, {}).get('name', label)) if value == 'auto' else ('existing', value)
             for label in item.groups
             if (value := normalized.get(label)) is not None
         }
@@ -267,6 +299,12 @@ def confirm(user, data):
         if batch.confirmed_request_hash != digest:
             raise RssConflict('已确认的导入不能改变选择。', code='idempotency_conflict')
         return batch_data(batch)
+    from api.rss.opml_grouping import grouping_snapshot, resolve_auto_groups, apply_existing_groups
+    if ('auto' in normalized.values() or batch.options.get('organize_existing')) and (
+            batch.options.get('grouping_snapshot') != grouping_snapshot(user)):
+        raise RssConflict('订阅、分组或目录快照已变化，请重新预览。')
+    auto_labels = {label for label, value in normalized.items() if value == 'auto'}
+    auto_resolved = resolve_auto_groups(user, auto_labels, batch.options.get('group_plan', {}))
     root_ids = {
         value['root_id'] for value in normalized.values() if isinstance(value, dict)
     }
@@ -289,11 +327,11 @@ def confirm(user, data):
     if ChannelGroup.objects.filter(user=user, name__in=requested_children).exists():
         raise RssConflict('已有同名子分组，请选择其数字 ID。')
 
-    resolved = {}
+    resolved = dict(auto_resolved)
     created_groups = {}
     touched_roots = set()
     for label, value in normalized.items():
-        if value is None:
+        if value is None or value == 'auto':
             continue
         if isinstance(value, dict):
             group = created_groups.get(value['create'])
@@ -313,10 +351,19 @@ def confirm(user, data):
         record_group_structure_change(user, root_ids=touched_roots)
     for item in items:
         item.selected_group_ids = sorted({resolved[label] for label in item.groups if label in resolved})
-        item.status = 'pending'
-    RssImportItem.objects.bulk_update(items, ['selected_group_ids', 'status'])
+        if str(item.pk) in existing_item_ids:
+            if not item.subscription_id:
+                raise RssConflict('原订阅已移除，请重新预览。')
+            item.status = 'succeeded'
+            if str(item.pk) not in organizable_item_ids:
+                item.selected_group_ids = []
+            if item.selected_group_ids and item.groups:
+                apply_existing_groups(user, item, item.selected_group_ids)
+        else:
+            item.status = 'pending'
+    RssImportItem.objects.bulk_update(items, ['selected_group_ids', 'status', 'outcome'])
     batch.confirmed_request_hash, batch.status = digest, 'confirmed'
-    batch.options = {'selected_ids': selected, 'group_map': resolved}
+    batch.options = {**batch.options, 'selected_ids': selected, 'group_map': resolved}
     batch.save(update_fields=['confirmed_request_hash', 'status', 'options', 'updated_at'])
     return batch_data(batch)
 

@@ -181,6 +181,9 @@ class ChannelSubscriptionsView(PersonalChannelsView):
                 subscription.groups.set(groups)
         else:
             raise ValidationError({'action': '无效操作。'})
+        if action in {'add_to_group', 'move_to_group', 'remove_from_group', 'set_groups'}:
+            # Fence even add/remove ABA edits against a pending import preview.
+            record_group_structure_change(request.user)
         return self.get(request)
 
 
@@ -322,6 +325,7 @@ class ChannelGroupDetailView(PersonalChannelsView):
                 group.subscriptions.set(subscriptions)
             else:
                 getattr(group.subscriptions, operation)(*subscriptions)
+        record_group_structure_change(request.user)
         return Response(group_data(group))
 
     @transaction.atomic

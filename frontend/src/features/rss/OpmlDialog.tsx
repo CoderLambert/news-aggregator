@@ -9,7 +9,7 @@ import OpmlHistory from './OpmlHistory'
 import { batchKey, importStatusText as statusText, importOutcomeText, invalidateImportEffects, type ImportBatch } from './opmlTypes'
 import { channelGroupPath, type ChannelGroup, type ChannelGroupRoot } from '@/types/channels'
 
-interface ConfirmRequest { preview_token: string; selected_ids: string[]; group_map: Record<string, number | { create: string; root_id: number } | null> }
+interface ConfirmRequest { preview_token: string; selected_ids: string[]; group_map: Record<string, number | 'auto' | { create: string; root_id: number } | null> }
 interface RetryRequest { batchId: string; selected_ids: string[] }
 interface OpmlDialogProps { viewer: number; roots: ChannelGroupRoot[]; groups: ChannelGroup[]; onClose: () => void }
 const validBatchId = (value: string) => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value)
@@ -27,6 +27,7 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
     return () => { controller.abort(); lifetime.current = null }
   }, [])
   const [file, setFile] = useState<File | null>(null)
+  const [organizeExisting, setOrganizeExisting] = useState(true)
   const [selected, setSelected] = useState<string[]>([])
   const [groupMap, setGroupMap] = useState<Record<string, string>>({})
   const [batchId, setBatchId] = useState<string | null>(null)
@@ -35,14 +36,19 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
   const [historyBusy, setHistoryBusy] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const invalidateSubscriptions = () => invalidateImportEffects(client, viewer)
-  const preview = useMutation({ retry: false, mutationFn: async (upload: File) => {
-    if (upload.size > 1024 * 1024) throw new Error('文件须小于1MiB。')
-    const body = new FormData(); body.append('file', upload)
+  const preview = useMutation({ retry: false, mutationFn: async (upload: File | null) => {
+    if (upload && upload.size > 1024 * 1024) throw new Error('文件须小于1MiB。')
+    const body = new FormData()
+    if (upload) body.append('file', upload)
+    body.append('organize_existing', String(organizeExisting || !upload))
+    if (!upload) body.append('organization_only', 'true')
     return workspaceRequest<ImportBatch>('/me/rss-imports/preview/', { method: 'POST', body, viewer, signal: lifetime.current?.signal })
   }, onSuccess: batch => {
     if (!lifetime.current) return
-    setSelected(batch.items.filter(item => item.status !== 'invalid' && item.outcome !== 'already_subscribed').map(item => item.id))
-    setGroupMap(Object.fromEntries(Object.entries(batch.group_matches ?? {}).map(([path, id]) => [path, String(id)])))
+    setSelected(batch.items.filter(item => item.status !== 'invalid' && (item.outcome !== 'already_subscribed' || item.can_organize)).map(item => item.id))
+    setGroupMap({ ...Object.fromEntries(Object.entries(batch.group_matches ?? {}).map(([path, id]) => [path, String(id)])),
+      ...Object.fromEntries(Object.entries(batch.group_plan ?? {}).filter(([, plan]) => plan.action !== 'conflict').map(([path]) => [path, 'auto'])),
+    })
   } })
   const confirm = useMutation({ retry: false, mutationFn: (body: ConfirmRequest) => workspaceRequest<ImportBatch>('/me/rss-imports/confirm/', {
     method: 'POST', viewer, body, signal: lifetime.current?.signal,
@@ -95,12 +101,13 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
     confirm.mutate({ preview_token: preview.data.preview_token, selected_ids: [...selected],
       group_map: Object.fromEntries(Object.entries(groupMap).map(([key, value]) => {
         const childName = preview.data?.group_names?.[key] ?? (key.split(' / ').at(-1) ?? key)
+        if (value === 'auto') return [key, 'auto']
         if (value.startsWith('new:')) return [key, { create: childName.slice(0, 40), root_id: Number(value.slice(4)) }]
         return [key, value ? Number(value) : null]
       })),
     })
   }
-  const validItems = preview.data?.items.filter(item => item.status !== 'invalid' && item.outcome !== 'already_subscribed') ?? []
+  const validItems = preview.data?.items.filter(item => item.status !== 'invalid' && (item.outcome !== 'already_subscribed' || item.can_organize)) ?? []
   return <WorkspaceModal title="OPML 批量导入" onClose={onClose} busy={busy}>
     <div role="group" aria-label="OPML 管理" className="mb-4 flex flex-wrap gap-2">
       <Button type="button" variant={showHistory ? 'outline' : 'default'} aria-pressed={!showHistory} disabled={busy} onClick={() => setShowHistory(false)}>导入文件</Button>
@@ -109,7 +116,10 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
     {showHistory ? <OpmlHistory viewer={viewer} onBusyChange={setHistoryBusy} onOpen={id => {
       preview.reset(); confirm.reset(); retry.reset(); setSelected([]); setGroupMap({}); setBatchId(id); setResumeId(id); setShowHistory(false)
     }} /> : <>
-    <p className="workspace-muted">上传 OPML 文件，先检查订阅与分组，再确认导入。最多500个订阅，文件不超过1MiB。文件会保存到仅自己可见的导入历史。</p>
+    <p className="workspace-muted">上传 OPML 文件，先检查订阅与分组，再确认导入。最多500个订阅，文件不超过1MiB。文件会保存到仅自己可见的导入历史。502项公共目录不是全部个人订阅，请拆分文件或在目录中按需选择；账号订阅上限不变。</p>
+    <p className="workspace-muted">按明确的两级路径自动创建或复用个人组；单层目录放入「OPML 导入」栏目。不会调用 AI，不移动已有手工归组。无明确分类的保留未分组。</p>
+    <label className="workspace-resolved-choice"><Input type="checkbox" className="size-4 shrink-0" checked={organizeExisting} disabled={busy} onChange={event => { setOrganizeExisting(event.target.checked); resetPreview() }} />同时整理已有未分组订阅（仅按明确 OPML / 本地目录关联）</label>
+    <Button type="button" variant="outline" disabled={busy} onClick={() => { resetPreview(); preview.mutate(null) }}>仅预览整理已有未分组</Button>
     <form className="workspace-inline-form" onSubmit={event => {
       event.preventDefault()
       if (busy || !file || file.size > 1024 * 1024) return
@@ -172,22 +182,27 @@ function OpmlSession({ viewer, roots, groups, onClose }: OpmlDialogProps) {
     </p>}
     {batch && <section aria-label="导入预览与进度" className="space-y-3">
       {!batchId ? <div className="space-y-2">
+        {batch.organize_existing && <p className="workspace-muted">其中可整理已有未分组 {batch.items.filter(item => item.can_organize).length} 项；手工归组不动，未知保留未分组。下面只应用勾选的项目及目标分组。</p>}
         <p role="status">共 {batch.items.length} 项 · 可导入 {validItems.length} 项 · 无效 {batch.items.filter(item => item.status === 'invalid').length} 项 · 重复合并 {batch.duplicate_count ?? 0} 项 · 已订阅 {batch.items.filter(item => item.outcome === 'already_subscribed').length} 项 · 已选 {selected.length} 项</p>
         <Button type="button" variant="outline" disabled={busy || confirm.isError || !validItems.length} onClick={() => setSelected(selected.length === validItems.length ? [] : validItems.map(item => item.id))}>{selected.length === validItems.length && validItems.length ? '取消全选' : '全选有效频道'}</Button>
       </div> : <p role="status" aria-live="polite">{batch.status === 'removed' ? `本批次已移除 ${batch.removed_count} 个新增订阅` : `已订阅/接入 ${batch.items.filter(item => item.status === 'succeeded').length} · 失败 ${batch.items.filter(item => item.status === 'failed').length} · 处理中 ${batch.items.filter(item => ['pending', 'queued'].includes(item.status)).length}`}</p>}
       {!batchId && batch.groups.map(key => {
         const label = batch.group_labels?.[key] ?? key
         const childName = batch.group_names?.[key] ?? (label.split(' / ').at(-1) ?? label)
+        const plan = batch.group_plan?.[key]
         return <label className="workspace-resolved-choice" key={key}>{label}
           <NativeSelect aria-label={label + '映射分组'} disabled={busy || confirm.isError} value={groupMap[key] ?? ''} onChange={event => setGroupMap(current => ({ ...current, [key]: event.target.value }))}>
             <option value="">不加入分组</option>
+            {plan && plan.action !== 'conflict' && <option value="auto">{plan.action === 'reuse' ? '复用' : plan.create_root ? '新建栏目及子组' : '新建子组'}：{plan.root_name} / {plan.name}</option>}
             {roots.map(root => <option key={'new:' + root.id} value={'new:' + root.id}>在「{root.name}」下创建「{childName.slice(0, 40)}」</option>)}
             {groups.map(group => <option key={group.id} value={group.id}>{channelGroupPath(group, roots)}</option>)}
-          </NativeSelect></label>
+          </NativeSelect>
+          {plan?.reason && <small role="status">{plan.reason}；默认保留未分组。</small>}
+        </label>
       })}
       <ul className="workspace-resolved max-h-[40vh] overflow-y-auto overscroll-contain">{batch.items.map(item => <li key={item.id} className="workspace-resolved-choice">
-        {!batchId && <Input className="size-4 shrink-0 accent-primary shadow-none" type="checkbox" aria-label={'导入 ' + (item.title || item.feed_url)} disabled={busy || confirm.isError || item.status === 'invalid' || item.outcome === 'already_subscribed'} checked={selected.includes(item.id)} onChange={event => setSelected(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />}
-        <span><strong>{item.title || item.feed_url}</strong><small className="break-all">{item.feed_url}</small><small>{batchId && item.status === 'preview' ? '未选择，未导入' : (item.status === 'succeeded' && item.outcome !== 'already_subscribed' ? '已接入' : importOutcomeText[item.outcome ?? ''] ?? statusText[item.status] ?? '等待确认')}{item.error_code ? ' · ' + (item.error_code === 'throttled' ? (item.status === 'pending' ? '连接名额暂满，等待自动继续' : '连接暂受限，请稍后重试') : item.error_code === 'subscription_limit' ? '已达到订阅数量上限' : item.error_code) : ''}</small>{!!item.duplicate_count && <small>文件内已合并 {item.duplicate_count} 个重复条目</small>}{item.next_attempt && <small>下次自动处理：{new Date(item.next_attempt).toLocaleTimeString('zh-CN')}</small>}</span>
+        {!batchId && <Input className="size-4 shrink-0 accent-primary shadow-none" type="checkbox" aria-label={'导入 ' + (item.title || item.feed_url)} disabled={busy || confirm.isError || item.status === 'invalid' || (item.outcome === 'already_subscribed' && !item.can_organize)} checked={selected.includes(item.id)} onChange={event => setSelected(current => event.target.checked ? [...current, item.id] : current.filter(id => id !== item.id))} />}
+        <span><strong>{item.title || item.feed_url}</strong><small className="break-all">{item.feed_url}</small><small>{!batchId && item.can_organize ? '已有未分组：确认后整理，不重复订阅' : batchId && item.status === 'preview' ? '未选择，未导入' : (item.status === 'succeeded' && item.outcome !== 'already_subscribed' ? '已接入' : importOutcomeText[item.outcome ?? ''] ?? statusText[item.status] ?? '等待确认')}{item.error_code ? ' · ' + (item.error_code === 'throttled' ? (item.status === 'pending' ? '连接名额暂满，等待自动继续' : '连接暂受限，请稍后重试') : item.error_code === 'subscription_limit' ? '已达到订阅数量上限' : item.error_code) : ''}</small>{!!item.duplicate_count && <small>文件内已合并 {item.duplicate_count} 个重复条目</small>}{item.next_attempt && <small>下次自动处理：{new Date(item.next_attempt).toLocaleTimeString('zh-CN')}</small>}</span>
         {batchId && item.status === 'failed' && (item.can_retry ?? true) && <Button type="button" variant="outline" disabled={busy || progress.isFetching || progress.isError || retry.isError} onClick={() => retry.mutate({ batchId, selected_ids: [item.id] })}>重试此项</Button>}
       </li>)}</ul>
     </section>}
