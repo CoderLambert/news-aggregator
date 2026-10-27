@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, FolderOpen, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderOpen, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import AuthModal from '@/components/AuthModal'
 import WorkspaceModal from '@/components/workspace/WorkspaceModal'
@@ -164,7 +164,7 @@ function Groups() {
     {user && config.ready && !config.error && <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)]">
       <nav aria-label="分组层级" className="workspace-panel min-w-0 self-start p-3">
         {groups.filter(item => item.root_id === null).map(item => <Button key={item.id} type="button" variant={group?.id === item.id ? 'secondary' : 'ghost'}
-          className="h-auto w-full min-w-0 justify-start whitespace-normal text-left" onClick={() => selectGroup(item)}><FolderOpen size={16} className="shrink-0" /><span className="break-words [overflow-wrap:anywhere]">{channelGroupPath(item, roots)}</span><span className="ml-auto text-xs text-muted-foreground">{item.source_ids.length}</span></Button>)}
+          className="h-auto w-full min-w-0 justify-start whitespace-normal text-left" onClick={() => selectGroup(item)}><Folder size={16} className="shrink-0" aria-hidden="true" /><span className="break-words [overflow-wrap:anywhere]">{item.name}</span><span className="ml-auto text-xs text-muted-foreground">{item.source_ids.length}</span></Button>)}
         {roots.map(item => {
           const children = groups.filter(child => child.root_id === item.id)
           const isCollapsed = collapsed.has(item.id)
@@ -179,11 +179,11 @@ function Groups() {
                 })}>
                 {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
               </Button>
-              <Button type="button" variant={root?.id === item.id && !group ? 'secondary' : 'ghost'} className="min-w-0 flex-1 justify-start whitespace-normal text-left"
-                onClick={() => selectRoot(item.id)}><FolderOpen size={16} className="shrink-0" /><span className="break-words [overflow-wrap:anywhere]">{item.name}</span><span className="ml-auto text-xs text-muted-foreground">{children.length}</span></Button>
+              <Button type="button" variant={root?.id === item.id && !group ? 'secondary' : 'ghost'} className="h-auto min-w-0 flex-1 justify-start whitespace-normal text-left"
+                onClick={() => selectRoot(item.id)}>{isCollapsed ? <Folder size={16} className="shrink-0" aria-hidden="true" /> : <FolderOpen size={16} className="shrink-0" aria-hidden="true" />}<span className="break-words [overflow-wrap:anywhere]">{item.name}</span><span className="ml-auto text-xs text-muted-foreground">{children.length}</span></Button>
             </div>
             {!isCollapsed && <div className="ml-8 border-l pl-2">{children.map(child => <Button key={child.id} type="button" variant={group?.id === child.id ? 'secondary' : 'ghost'}
-              className="h-auto w-full min-w-0 justify-start whitespace-normal text-left" onClick={() => selectGroup(child)}><span className="break-words [overflow-wrap:anywhere]">{child.name}</span><span className="ml-auto text-xs text-muted-foreground">{child.source_ids.length}</span></Button>)}</div>}
+              className="h-auto w-full min-w-0 justify-start whitespace-normal text-left" onClick={() => selectGroup(child)}><Folder size={16} className="shrink-0" aria-hidden="true" /><span className="break-words [overflow-wrap:anywhere]">{child.name}</span><span className="ml-auto text-xs text-muted-foreground">{child.source_ids.length}</span></Button>)}</div>}
           </div>
         })}
         {!roots.length && <p className="workspace-caption">还没有根分类。</p>}
@@ -195,7 +195,7 @@ function Groups() {
             <Button type="button" variant="ghost" size="icon" aria-label="重命名根分类" disabled={!writable} onClick={() => setEditor({ kind: 'root', id: root.id, name: root.name, version: root.version })}><Pencil size={17} /></Button>
             <Button type="button" variant="ghost" size="icon" aria-label="删除空根分类" disabled={!writable || root.child_count > 0} onClick={() => setDeleting({ kind: 'root', row: root })}><Trash2 size={17} /></Button>
           </div></header>
-          {groups.filter(item => item.root_id === root.id).length ? <ul className="space-y-2">{groups.filter(item => item.root_id === root.id).map(child => <li key={child.id}><Button type="button" variant="outline" className="h-auto w-full justify-between whitespace-normal" onClick={() => selectGroup(child)}><span>{channelGroupPath(child, roots)}</span><span>{child.source_ids.length} 个频道</span></Button></li>)}</ul> : <div className="workspace-empty"><p>这个根分类还没有子分组。</p></div>}
+          {groups.filter(item => item.root_id === root.id).length ? <ul className="space-y-2">{groups.filter(item => item.root_id === root.id).map(child => <li key={child.id}><Button type="button" variant="outline" className="h-auto w-full min-w-0 justify-start whitespace-normal text-left" onClick={() => selectGroup(child)}><Folder size={16} className="shrink-0" aria-hidden="true" /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{child.name}</span><span className="ml-auto shrink-0">{child.source_ids.length} 个频道</span></Button></li>)}</ul> : <div className="workspace-empty"><p>这个根分类还没有子分组。</p></div>}
         </section>}
         {group && <section className="workspace-panel min-w-0">
           <header className="workspace-panel-heading"><div><h2>{channelGroupPath(group, roots)}</h2><p className="workspace-caption">已加入 {group.source_ids.length} 个频道</p></div><div className="workspace-actions">
