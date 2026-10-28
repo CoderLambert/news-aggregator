@@ -2,8 +2,29 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
+import process from "node:process";
+
+// Server-only environment variable: never expose backend configuration via VITE_*.
+// Fail closed rather than accidentally proxying a development UI to a remote site.
+let apiTarget;
+try {
+  apiTarget = new URL(
+    process.env.NEWSHUB_DEV_API_TARGET ?? "http://127.0.0.1:9527",
+  );
+  if (
+    !["http:", "https:"].includes(apiTarget.protocol) ||
+    !["127.0.0.1", "localhost", "[::1]"].includes(apiTarget.hostname) ||
+    apiTarget.username || apiTarget.password ||
+    apiTarget.pathname !== "/" || apiTarget.search || apiTarget.hash
+  ) throw new Error("invalid target");
+} catch {
+  throw new Error("NEWSHUB_DEV_API_TARGET must be a loopback HTTP(S) origin without credentials, path, query or fragment.");
+}
 
 export default defineConfig({
+  ...(process.env.NEWSHUB_DEV_CACHE_DIR
+    ? { cacheDir: process.env.NEWSHUB_DEV_CACHE_DIR }
+    : {}),
   plugins: [
     react({
       babel: {
@@ -23,9 +44,11 @@ export default defineConfig({
     },
   },
   server: {
+    host: "127.0.0.1",
+    strictPort: true,
     proxy: {
       "/api": {
-        target: "http://localhost:9527",
+        target: apiTarget.origin,
         changeOrigin: true,
         timeout: 180000,
         proxyTimeout: 180000,
