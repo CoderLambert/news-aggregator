@@ -7,7 +7,7 @@ import { useAuth } from '@/context/AuthContext'
 import { Badge } from '@/components/ui/badge'
 import TranslationStatus from '@/components/news-detail/TranslationStatus'
 import { useBlockNews } from '@/hooks/useNewsMutations'
-import { newsDetailOptions } from '@/services/newsQueries'
+import { cancelScheduledNewsDetailPrefetch, scheduleNewsDetailPrefetch } from '@/services/newsQueries'
 import type { DisplayMode, NewsSummary } from '@/types/news'
 import { formatUnverifiedNewsTime } from '@/utils/newsTime'
 import { hasReadableFullContent, hasPendingFullContentTask } from '@/types/news'
@@ -81,7 +81,11 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
   const viewerId: number | string = user?.id ?? 'anonymous'
 
   function prefetchDetail() {
-    void queryClient.prefetchQuery(newsDetailOptions(news.id, lang, viewerId))
+    scheduleNewsDetailPrefetch(queryClient, news.id, lang, viewerId)
+  }
+
+  function cancelPrefetch() {
+    cancelScheduledNewsDetailPrefetch(queryClient, news.id, lang, viewerId)
   }
 
   async function handleBlock(event: MouseEvent<HTMLButtonElement>) {
@@ -99,7 +103,7 @@ export default function NewsCard({ news, onBlockStart, onBlocked }: NewsCardProp
 
   return (
     <article className={`news-card-render group relative overflow-hidden rounded-2xl border border-border bg-card transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md ${news.cover_image ? 'news-card-has-image' : 'news-card-no-image'}`}>
-      <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onMouseEnter={prefetchDetail} onFocus={prefetchDetail}>
+      <Link id={`news-card-${news.id}`} to={`/news/${news.id}`} state={{ from: returnTo }} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onMouseEnter={prefetchDetail} onMouseLeave={cancelPrefetch} onFocus={prefetchDetail} onBlur={cancelPrefetch}>
         {news.cover_image && <div className="news-card-image aspect-video overflow-hidden bg-muted"><img src={news.cover_image} alt="" className="h-full w-full object-cover" loading="lazy" /></div>}
         <div className={`news-card-body p-4 ${user && blockedNewsEnabled ? 'pr-12' : ''}`}>
           <div className="news-card-meta mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">

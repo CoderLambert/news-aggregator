@@ -1,6 +1,4 @@
 """RSS-backed channel catalog. Reads never register static collector sources."""
-from django.db.models import F
-
 PUBLISHER_COUNTRIES = {'bbc': 'UK', 'bbc_health': 'UK', 'deepmind': 'UK', 'mistral': 'FR',
                        'leiphone': 'CN', 'jiqizhixin': 'CN', 'sanliu_kr': 'CN',
                        'ithome_energy': 'CN', 'ifanr_energy': 'CN'}
@@ -13,7 +11,7 @@ def current_feed_links(source):
         binding__engine_instance_uuid=instance, binding__account_id=account)
 
 
-def subscription_status(source):
+def _publication_status(source):
     publication = getattr(source, 'publication', None)
     if publication is None or publication.owner == 'legacy':
         from api.services.source_policy import policy_for_name
@@ -21,21 +19,23 @@ def subscription_status(source):
         return 'inactive', (policy.unsupported_reason if policy else '') or 'legacy_ingestion_retired'
     if publication.owner != 'miniflux':
         return 'inactive', publication.pause_reason or 'paused'
-    from api.rss.subscriptions import EngineUnavailable
-    try:
-        links = current_feed_links(source)
-    except EngineUnavailable:
-        return 'inactive', 'engine_unavailable'
-    verified = links.filter(binding__engine_feed_id__isnull=False,
-        binding__connection_state__in=['ready', 'paused'],
-        binding__applied_policy_version=F('binding__policy_version'))
+    return None
+
+
+def _link_verified(link):
+    binding = link.binding
+    return (binding.engine_feed_id is not None and binding.connection_state in ('ready', 'paused')
+            and binding.applied_policy_version == binding.policy_version)
+
+
+def _status_from_links(links, blocked):
+    from api.rss.feed_policy import assert_binding_policy
+    from api.rss.operations import OperationError
     # A paused physical feed remains subscribable: subscribing reconciles its references.
-    if verified.exists():
-        from api.rss.feed_policy import assert_binding_policy
-        from api.rss.operations import OperationError
-        from api.rss.operations import unresolved_control_operations
-        for link in verified.select_related('binding'):
-            if unresolved_control_operations(link.binding_id).exists():
+    verified = [link for link in links if _link_verified(link)]
+    if verified:
+        for link in verified:
+            if link.binding_id in blocked:
                 continue
             try:
                 assert_binding_policy(link.binding)
@@ -43,13 +43,81 @@ def subscription_status(source):
                 continue
             return 'active', ''
         return 'inactive', 'source_policy_not_permitted'
-    binding = links.select_related('binding').order_by('pk').first()
-    if binding:
-        if binding.binding.last_error and any(word in binding.binding.last_error for word in ('unknown', 'unproven')):
+    if links:
+        binding = links[0].binding
+        if binding.last_error and any(word in binding.last_error for word in ('unknown', 'unproven')):
             return 'inactive', 'feed_outcome_unknown'
         return 'inactive', {'error': 'feed_error', 'unknown': 'feed_outcome_unknown'}.get(
-            binding.binding.connection_state, 'feed_verification_pending')
+            binding.connection_state, 'feed_verification_pending')
     return 'inactive', 'unconfigured_source'
+
+
+def _compute_subscription_status(source):
+    early = _publication_status(source)
+    if early is not None:
+        return early
+    from api.rss.operations import unresolved_control_binding_ids
+    from api.rss.subscriptions import EngineUnavailable
+    try:
+        links = list(current_feed_links(source).select_related('binding').order_by('pk'))
+    except EngineUnavailable:
+        return 'inactive', 'engine_unavailable'
+    verified_ids = [link.binding_id for link in links if _link_verified(link)]
+    blocked = unresolved_control_binding_ids(verified_ids) if verified_ids else set()
+    return _status_from_links(links, blocked)
+
+
+def subscription_status(source):
+    cached = getattr(source, '_rss_subscription_status', None)
+    if cached is not None:
+        return cached
+    return _compute_subscription_status(source)
+
+
+def prime_subscription_status(sources):
+    """Attach catalog status for one response without a per-source link scan.
+
+    The tuple is stored on these instances only. ``subscription_status`` still
+    re-reads the database when a caller has not primed the instance.
+    """
+    if not sources:
+        return
+    pending = []
+    for source in sources:
+        if getattr(source, '_rss_subscription_status', None) is not None:
+            continue
+        early = _publication_status(source)
+        if early is not None:
+            source._rss_subscription_status = early
+        else:
+            pending.append(source)
+    if not pending:
+        return
+    from api.rss.models import SourceFeedLink
+    from api.rss.operations import unresolved_control_binding_ids
+    from api.rss.subscriptions import EngineUnavailable, engine_identity
+    try:
+        instance, account = engine_identity()
+    except EngineUnavailable:
+        for source in pending:
+            source._rss_subscription_status = ('inactive', 'engine_unavailable')
+        return
+    grouped = {}
+    verified_ids = []
+    links = SourceFeedLink.objects.filter(
+        source_id__in=[source.pk for source in pending], enabled=True,
+        association_policy={'version': 1, 'mode': 'all'},
+        binding__engine_instance_uuid=instance, binding__account_id=account,
+    ).select_related('binding').order_by('pk')
+    for link in links:
+        grouped.setdefault(link.source_id, []).append(link)
+        if _link_verified(link):
+            verified_ids.append(link.binding_id)
+    blocked = unresolved_control_binding_ids(verified_ids)
+    from api.services.source_policy import source_config_snapshot
+    with source_config_snapshot():
+        for source in pending:
+            source._rss_subscription_status = _status_from_links(grouped.get(source.pk, []), blocked)
 
 
 def rss_status(source):

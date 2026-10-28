@@ -4,6 +4,7 @@ import { newsKeys, newsListOptions } from '@/services/newsQueries'
 
 vi.mock('@/services/api', () => ({
   fetchNews: vi.fn(),
+  fetchNewsDetail: vi.fn(),
   fetchCategories: vi.fn(),
   fetchSources: vi.fn(),
 }))
@@ -31,6 +32,34 @@ describe('news query definitions', () => {
   })
 })
 
+
+it('coalesces feed-card detail prefetches into the card the pointer settles on', async () => {
+  vi.useFakeTimers()
+  const { QueryClient } = await import('@tanstack/react-query')
+  const { fetchNewsDetail } = await import('@/services/api')
+  const { cancelScheduledNewsDetailPrefetch, resetScheduledNewsDetailPrefetch, scheduleNewsDetailPrefetch } = await import('@/services/newsQueries')
+  fetchNewsDetail.mockResolvedValue({ id: 1, title: 'Settled', content: 'body', content_zh: '' })
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  resetScheduledNewsDetailPrefetch()
+  for (const id of [11, 12, 13]) scheduleNewsDetailPrefetch(client, id, 'zh', 4)
+  await vi.advanceTimersByTimeAsync(179)
+  expect(fetchNewsDetail).not.toHaveBeenCalled()
+  cancelScheduledNewsDetailPrefetch(client, 13, 'zh', 4)
+  await vi.advanceTimersByTimeAsync(180)
+  expect(fetchNewsDetail).not.toHaveBeenCalled()
+  scheduleNewsDetailPrefetch(client, 13, 'zh', 4)
+  await vi.advanceTimersByTimeAsync(180)
+  expect(fetchNewsDetail).toHaveBeenCalledTimes(1)
+  expect(fetchNewsDetail).toHaveBeenCalledWith(13, expect.any(AbortSignal))
+  cancelScheduledNewsDetailPrefetch(client, 13, 'zh', 4)
+  scheduleNewsDetailPrefetch(client, 14, 'zh', 4)
+  await vi.advanceTimersByTimeAsync(180)
+  expect(fetchNewsDetail).toHaveBeenCalledTimes(2)
+  expect(fetchNewsDetail).toHaveBeenLastCalledWith(14, expect.any(AbortSignal))
+  resetScheduledNewsDetailPrefetch()
+  client.clear()
+  vi.useRealTimers()
+})
 
 it('keeps source data separate for two viewers and subscription versus history use', async () => {
   const { QueryClient } = await import('@tanstack/react-query')

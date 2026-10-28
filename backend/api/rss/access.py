@@ -243,21 +243,54 @@ def prepare_article_previews(user, articles):
 
 
 def with_authorized_source_counts(user, sources):
-    """Count authorized members in SQL without a per-source application query."""
-    from django.db.models import Count, IntegerField, Subquery
-    from django.db.models.functions import Coalesce
-    sources = sources.annotate(_rss_count_source_key=Case(
+    """Count authorized members once per path, then attach the totals.
+
+    A correlated ``authorized_news`` subquery per source re-scans the article
+    table for every channel on the history catalog. Group the same primary,
+    legacy-key, and engine-link rules, and keep public-membership channels on
+    their own explicit entries.
+    """
+    from collections import Counter
+    from django.db.models import IntegerField
+    from api.rss.public_membership import public_entries_for_sources
+    rows = list(sources.annotate(_rss_count_source_key=Case(
         *[When(name=policy.name, then=Value(policy.key)) for policy in POLICIES.values()],
         default=Value(None), output_field=CharField(),
+    )).values_list('pk', '_rss_count_source_key', 'publication__requires_public_membership'))
+    if not rows:
+        return sources.annotate(rss_news_count=Value(0, output_field=IntegerField()))
+    public_ids = [pk for pk, _key, public in rows if public]
+    regular = [(pk, key) for pk, key, public in rows if not public]
+    regular_ids = [pk for pk, _key in regular]
+    key_to_source = {key: pk for pk, key in regular if key}
+    authorized = authorized_news(user)
+    pairs = set()
+    if regular_ids:
+        pairs.update(authorized.filter(source_id__in=regular_ids).values_list('source_id', 'pk'))
+        pairs.update(EngineEntryMap.objects.filter(
+            disposition='linked', news_id__in=authorized.values('pk'),
+            binding__source_links__source_id__in=regular_ids,
+            binding__source_links__association_policy=ALL_ENTRIES,
+        ).values_list('binding__source_links__source_id', 'news_id'))
+    if key_to_source:
+        for key, news_id in NewsSourceItem.objects.filter(
+            news_id__in=authorized.values('pk'), source_key__in=key_to_source,
+        ).values_list('source_key', 'news_id'):
+            source_id = key_to_source.get(key)
+            if source_id is not None:
+                pairs.add((source_id, news_id))
+    regular_counts = Counter(source_id for source_id, _news_id in pairs)
+    public_counts = Counter()
+    if public_ids:
+        public_pairs = set(public_entries_for_sources(Source.objects.filter(pk__in=public_ids)).filter(
+            entry__news_id__in=authorized.values('pk'),
+        ).values_list('source_id', 'entry__news_id'))
+        public_counts.update(source_id for source_id, _news_id in public_pairs)
+    totals = {
+        pk: public_counts[pk] if public else regular_counts[pk]
+        for pk, _key, public in rows
+    }
+    return sources.annotate(rss_news_count=Case(
+        *[When(pk=pk, then=Value(total)) for pk, total in totals.items()],
+        default=Value(0), output_field=IntegerField(),
     ))
-    members = authorized_news(user).filter(
-        Q(source_id=OuterRef('pk')) | Q(source_items__source_key=OuterRef('_rss_count_source_key')) |
-        Q(engine_entries__disposition='linked', engine_entries__binding__source_links__source_id=OuterRef('pk'),
-          engine_entries__binding__source_links__association_policy=ALL_ENTRIES)
-    ).order_by().values(_group=Value(1)).annotate(n=Count('pk', distinct=True)).values('n')
-    from api.rss.public_membership import public_entries_for_sources
-    public_counts = public_entries_for_sources(Source.objects.all()).filter(source_id=OuterRef('pk'),
-        entry__news_id__in=authorized_news(user).values('pk')).order_by().values(_group=Value(1)).annotate(n=Count('entry__news_id',distinct=True)).values('n')
-    return sources.annotate(rss_news_count=Case(When(publication__requires_public_membership=True,
-        then=Coalesce(Subquery(public_counts, output_field=IntegerField()), Value(0))),
-        default=Coalesce(Subquery(members, output_field=IntegerField()), Value(0)),output_field=IntegerField()))

@@ -1,4 +1,6 @@
 """Reviewed source contracts. Enabling flags never grants an unknown contract."""
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -144,13 +146,48 @@ def policy_from_config(config):
     )
 
 
+_source_config_snapshot: ContextVar = ContextVar('rss_source_config_snapshot', default=None)
+
+
+@contextmanager
+def source_config_snapshot():
+    """Reuse one SourceConfig read for repeated admission checks in a catalog request.
+
+    The snapshot belongs to this context only and is discarded when the block
+    exits. Feed admission that writes a contract must not keep it across that write.
+    """
+    from api.models import SourceConfig
+    configs = tuple(SourceConfig.objects.select_related('category').prefetch_related('endpoints'))
+    token = _source_config_snapshot.set(configs)
+    try:
+        yield
+    finally:
+        _source_config_snapshot.reset(token)
+
+
+def iter_source_configs():
+    cached = _source_config_snapshot.get()
+    if cached is not None:
+        return cached
+    from api.models import SourceConfig
+    return SourceConfig.objects.select_related('category').prefetch_related('endpoints')
+
+
+def config_for_source(source_id):
+    cached = _source_config_snapshot.get()
+    if cached is not None:
+        return next((config for config in cached if config.source_id == source_id), None)
+    from api.models import SourceConfig
+    return SourceConfig.objects.select_related('category').prefetch_related('endpoints').filter(source_id=source_id).first()
+
+
 def _database_policies(*, include_unavailable=True):
     policies = []
     try:
-        from api.models import SourceConfig
-        configs = SourceConfig.objects.select_related('category').prefetch_related('endpoints')
+        configs = iter_source_configs()
         if not include_unavailable:
-            configs = configs.filter(status__in=['approved', 'enabled'])
+            configs = configs.filter(status__in=['approved', 'enabled']) if not isinstance(configs, tuple) else tuple(
+                config for config in configs if config.status in {'approved', 'enabled'})
         for config in configs:
             if config.source_key not in POLICIES and config.source_key not in _RUNTIME_POLICIES:
                 policies.append(policy_from_config(config))
