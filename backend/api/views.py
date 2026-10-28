@@ -805,8 +805,9 @@ class NewsChatView(ArticleAccessMixin, generics.GenericAPIView):
             return Response({'error_code': 'translation_result_unavailable'},
                             status=status.HTTP_404_NOT_FOUND)
         chat_scope = stored.scope
-        # CHAT_EVIDENCE_CHAR_CEILING is a model-safety cap. Shorter bodies are
-        # sent in full on purpose; this slice is not an FAQ excerpt.
+        # CHAT_EVIDENCE_CHAR_CEILING is a model-safety cap (30000 characters).
+        # Bodies at or below it are sent in full on purpose; this slice is not
+        # an FAQ excerpt.
         from api.services.ai_article_chat import CHAT_EVIDENCE_CHAR_CEILING
         safety_capped = len(context) > CHAT_EVIDENCE_CHAR_CEILING
         if safety_capped:
