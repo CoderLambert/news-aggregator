@@ -193,10 +193,12 @@ class PrivateTranslationTests(TransactionTestCase):
         if redis is None:
             self.skipTest('requires explicitly isolated synthetic Redis')
         real_finish = service._finish
-        def finish(*args):
+        def finish(*args, **kwargs):
             channel = RedisChannel(self.owner.pk, args[0], args[1])
             self.assertEqual(channel.read()['status'], 'running')
-            result = real_finish(*args)
+            # Skip metadata is keyword-only. Dropping it would TypeError before
+            # the fenced commit and publish a false failure.
+            result = real_finish(*args, **kwargs)
             self.assertTrue(ChatGPTArticleTranslation.objects.filter(pk=result['result_id']).exists())
             self.assertEqual(channel.read()['status'], 'running')
             return result
