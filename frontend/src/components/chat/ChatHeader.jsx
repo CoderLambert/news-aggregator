@@ -86,7 +86,7 @@ function subtitleFor(mood) {
     case "think":
       return "让我想想…";
     case "talk":
-      return "正在回答你～";
+      return "小闻正在回答";
     case "happy":
       return "希望对你有帮助 🎉";
     case "confused":

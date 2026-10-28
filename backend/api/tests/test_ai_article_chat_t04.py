@@ -203,6 +203,58 @@ class PersonalArticleChatTests(TestCase):
         other_client.force_login(self.other)
         self.assertEqual(other_client.get(self.url).data['messages'], [])
 
+    def test_summary_question_keeps_full_article_and_uses_a_short_token_budget(self):
+        body = 'FULL_EVIDENCE_SENTENCE about the event. ' * 40
+        self.news.full_content = body
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        gateway = FakeGateway([gateway_frame('- 要点')])
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway), \
+             self.assertLogs('api.views', level='INFO') as captured:
+            response = self._chat(model=self.model, question='这篇文章的核心信息是什么？')
+            self.assertEqual(response.status_code, 200)
+            self._wire(response)
+        prompt = gateway.sent[0]['messages'][0]['content']
+        evidence = gateway.sent[0]['messages'][1]['content']
+        self.assertEqual(gateway.sent[0]['max_tokens'], 512)
+        self.assertIn('不可信数据', prompt)
+        self.assertIn('证据策略', prompt)
+        self.assertIn('约 180 个汉字', prompt)
+        self.assertIn(body, evidence)
+        self.assertIn('"evidence_policy": "full_article_body"', evidence)
+        self.assertIn('"context_scope": "full"', evidence)
+        self.assertNotIn(body, prompt)
+        output = '\n'.join(captured.output)
+        self.assertIn('summary_intent=True', output)
+        self.assertIn('article_chat_done', output)
+
+    def test_detail_question_keeps_the_deep_token_budget(self):
+        gateway = FakeGateway([gateway_frame('详细回答')])
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            response = self._chat(model=self.model, question='请详细分析这篇文章为什么重要')
+            self.assertEqual(response.status_code, 200)
+            self._wire(response)
+        self.assertEqual(gateway.sent[0]['max_tokens'], 2048)
+        self.assertIn('可以充分回答', gateway.sent[0]['messages'][0]['content'])
+
+    def test_overlong_article_is_safety_capped_not_reduced_to_a_faq_excerpt(self):
+        body = ('A' * 10050) + 'TAIL_MARKER'
+        self.news.full_content = body
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        gateway = FakeGateway([gateway_frame('节选回答')])
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            response = self._chat(model=self.model, question='What happened?')
+            self.assertEqual(response.status_code, 200)
+            self._wire(response)
+        evidence = gateway.sent[0]['messages'][1]['content']
+        self.assertEqual(gateway.sent[0]['max_tokens'], 2048)
+        self.assertIn('A' * 10000, evidence)
+        self.assertNotIn('TAIL_MARKER', evidence)
+        self.assertIn('"evidence_policy": "model_safety_excerpt"', evidence)
+        self.assertIn('"context_scope": "excerpt"', evidence)
+        self.assertIn('模型安全上限', gateway.sent[0]['messages'][0]['content'])
+
     def test_unknown_cross_owner_model_rejected_before_history_and_network(self):
         other_client = APIClient()
         other_client.force_login(self.other)

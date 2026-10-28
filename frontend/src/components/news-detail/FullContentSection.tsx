@@ -131,7 +131,7 @@ export default function FullContentSection({
             ? <div aria-label="未完成的译文"><p role="status" className="mb-3 text-sm text-amber-700">翻译未完成，未保存为完整译文。可重试翻译，或选择原文查看。</p>
                 {draft ? <><p className="mb-3 text-sm text-muted-foreground">以下是本次已接收的部分内容，仅供临时查看。</p><StreamingMarkdown content={draft} /></> : null}</div>
             : livePrivate && ['queued', 'running'].includes(livePrivate.status)
-            ? <div aria-label="正在生成的译文"><p role="status" className="mb-3 text-sm text-muted-foreground">翻译中，以下内容尚未完成。</p>
+            ? <div aria-label="正在生成的译文"><p role="status" className="mb-3 text-sm text-muted-foreground">全文翻译中，以下内容尚未完成。</p>
                 {livePrivate.progress ? <StreamingMarkdown content={livePrivate.progress} /> : <p className="text-sm text-muted-foreground">正在等待模型响应…</p>}</div>
             : <MarkdownContent content={content} legacyCodeRepair={legacyCodeRepair} />}
         </CardContent>
@@ -248,7 +248,7 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
       <Card className="mb-6 items-center border-border bg-primary/10 py-8 text-center">
         <Loader2 className="size-7 animate-spin text-primary" />
         <div>
-          <p className="mt-1 text-sm font-medium text-primary">{waitingShared ? '共享译文正在生成，完成后自动显示…' : '正在翻译全文…'}</p>
+          <p className="mt-1 text-sm font-medium text-primary">{waitingShared ? '共享译文正在生成，完成后自动显示…' : '全文翻译中'}</p>
           <p className="mt-1 text-xs text-primary">{waitingShared ? '正在复用其他读者发起的翻译，不会显示其他用户的私有进度。' : '取消会阻止后续请求与保存；正在进行的请求可能先完成。'}</p>
           {stopButton}
         </div>
@@ -259,7 +259,7 @@ function TranslationProgressUI({ progress, waitingShared, onStop }: { progress: 
     <div className="mb-6">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Loader2 className="size-3.5 animate-spin text-primary" />
-        <span className="text-xs font-medium text-primary">AI 正在翻译…</span>
+        <span className="text-xs font-medium text-primary">全文翻译中</span>
         {stopButton}
         <span className="sr-only">取消会阻止后续请求与保存；正在进行的请求可能先完成。</span>
       </div>

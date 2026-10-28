@@ -101,9 +101,9 @@ export default function ChatMessageList({
               message.content ? (
                 <div className="chat-message-markdown"><MarkdownContent content={message.content} /></div>
               ) : (
-                <div className="flex flex-col items-start gap-1 py-0.5" role="status" aria-label="小闻正在思考">
+                <div className="flex flex-col items-start gap-1 py-0.5" role="status" aria-label="小闻正在回答">
                   <div className="flex items-center gap-1.5 px-1"><span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" /></div>
-                  <span className="select-none text-xs text-muted-foreground">{message.web_search ? '正在联网搜索…' : '正在思考…'}</span>
+                  <span className="select-none text-xs text-muted-foreground">{message.web_search ? '正在联网搜索…' : '小闻正在回答'}</span>
                 </div>
               )
             ) : <div className="whitespace-pre-wrap">{message.content}</div>}

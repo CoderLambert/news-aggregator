@@ -137,7 +137,7 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown, on
   const uncertain = unknown || recovery.isError || models.isError || observationLost
   const canStart = !pending && !uncertain && !tooLarge && eligible && !sending
   const label = sending ? '正在提交…' : pending ? '正在读取翻译配置…' : uncertain ? '读取翻译状态' :
-    active ? (task?.status === 'queued' ? '继续翻译' : '正在翻译…') : task?.status === 'succeeded' ? '重新翻译' :
+    active ? (task?.status === 'queued' ? '继续翻译' : '全文翻译中') : task?.status === 'succeeded' ? '重新翻译' :
     retryable ? '重试翻译' : '翻译为中文'
   return <div aria-label="全文翻译" className="flex max-w-full flex-wrap items-center gap-2">
     <Button type="button" size="sm" className="rounded-full" disabled={(!uncertain && active && !recoverable) || sending || (!uncertain && !canStart)}
@@ -148,7 +148,10 @@ function TranslationSession({ viewer, newsId, sourceRevision, sourceMarkdown, on
     {active && <Button type="button" size="sm" variant="outline" className="rounded-full" disabled={sending}
       onClick={() => void runMutation('cancel')}>取消翻译</Button>}
     {!pending && !eligible && !active && !models.isError && <span role="status" className="text-xs text-muted-foreground">默认翻译模型当前不可用。</span>}
-    {active && <span role="status" className="text-xs text-muted-foreground">{observationLost ? '进度连接已断开，请读取翻译状态' : live && task?.progress ? '正在接收译文' : '正在等待模型响应'}。</span>}
+    {active && <span role="status" className="text-xs text-muted-foreground">{observationLost ? '进度连接已断开，请读取翻译状态' : live && task?.progress ? '正在接收全文译文' : '全文翻译中，等待模型响应'}。</span>}
+    {task?.status === 'succeeded' && task.result?.skipped_reason === 'mostly_chinese' && (
+      <span role="status" className="text-xs text-muted-foreground">原文主要是中文，已保留全文，未调用模型翻译。</span>
+    )}
     {task && ['failed', 'cancelled', 'interrupted'].includes(task.status) && <span role="status" className="text-xs text-muted-foreground">
       {task.status === 'cancelled' ? '翻译已取消' : '翻译未完成'}。
     </span>}
