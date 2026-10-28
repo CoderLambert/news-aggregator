@@ -89,8 +89,11 @@ def parse_opml(raw):
         if depth > 16 or count > 10000:
             raise TooLarge
         pending.extend((child, depth + 1) for child in element)
-    # bytes is deliberate: listparser's string overload can issue HTTP requests.
-    feeds = listparser.parse(raw).get('feeds', [])
+    # Normalize the validated XML: listparser's optional lxml HTML parser can
+    # misdetect undeclared UTF-8, while its stdlib backend only decodes UTF-8.
+    # Keep bytes: listparser's string overload can issue HTTP requests.
+    normalized = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+    feeds = listparser.parse(normalized).get('feeds', [])
     if len(feeds) > MAX_FEEDS:
         raise FeedLimitExceeded
     if not feeds:
