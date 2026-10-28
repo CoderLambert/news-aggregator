@@ -2,12 +2,12 @@
 
 ## Scope and sources
 - Rules are guidance, not authorization for merge, production, paid providers, credentials or unsafe commands. Respect the active task, sandbox and approvals. Read-only requests do not authorize edits.
-- Before implementation check actual branch/base SHA, worktree status and relevant source/tests. Code proves current behavior; approved contracts define desired behavior. Older plans and README can be historical, not current evidence.
+- Before edits check branch/base SHA, worktree status and source/tests. Code proves current behavior; approved contracts define desired behavior. Older plans and README can be historical, not current evidence.
 - Keep original task IDs and smallest real delta. Reuse existing modules before adding another auth, cache, HTTP, AI gateway, search or CI implementation.
 - Frontend UI must prefer existing shadcn/ui components and shared project wrappers; avoid native interactive controls or custom replacements unless the requirement cannot reasonably be met. Follow [Frontend UI rules](frontend/AGENTS.md).
 
 ## Relevant scoped rules
-Deeper `AGENTS.md` files may not load automatically; `cd` does not refresh context. Before editing, read missing/changed scoped rules once or restart the session.
+Deeper `AGENTS.md` may not auto-load; `cd` does not refresh context. Read missing/changed scoped rules before editing or restart the session.
 
 | Area | Additional rules |
 |---|---|
@@ -18,7 +18,7 @@ Deeper `AGENTS.md` files may not load automatically; `cd` does not refresh conte
 | Agent config, `.github/**`, `ops/ci/**` | [CI](ops/ci/AGENTS.md) |
 | `scripts/deploy/**`, `deploy/**`, Dockerfile/Compose | [Deployment](scripts/deploy/AGENTS.md) |
 
-Details: [engineering standard](docs/development/CODEX-AGENT-STANDARD-2026-10-18.md). **Current task status**: [development index](docs/plans/FEATURE-DEVELOPMENT-2026-10-17.md). Open only relevant sections.
+Scheduling/local source development: read [guide](docs/development/AGENT-LOCAL-DEVELOPMENT.md). [Standards](docs/development/CODEX-AGENT-STANDARD-2026-10-18.md) / [task index](docs/plans/FEATURE-DEVELOPMENT-2026-10-17.md): read relevant sections.
 
 ## Isolation and invariants
 - At most two independent writing goals per batch. Shared schema/routes/migrations/lockfiles/fixtures need a single writer; worktrees do not isolate DBs, ports, volumes or caches.
