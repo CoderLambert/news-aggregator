@@ -35,9 +35,10 @@ from api.services.stored_readers import StoredContentChanged, require_current, s
 MAX_CHAT_OUTPUT_TOKENS = 2048
 SUMMARY_CHAT_OUTPUT_TOKENS = 512
 MAX_CHAT_ANSWER_CHARS = 32768
-# Model-safety ceiling applied by the chat view. Below this, the full body is
-# evidence on purpose; the slice is not an FAQ excerpt.
-CHAT_EVIDENCE_CHAR_CEILING = 10000
+# Hard model-safety ceiling of 30000 characters, applied by the chat view.
+# At or below this length the full body is evidence on purpose; only a longer
+# body is sliced, and that slice is not an FAQ excerpt.
+CHAT_EVIDENCE_CHAR_CEILING = 30000
 
 _SUMMARY_INTENT = re.compile(
     r'(核心信息|核心观点|核心内容|关键信息|主要信息|要点|摘要|概要|简介|一句话|'

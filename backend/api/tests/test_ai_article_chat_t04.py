@@ -237,8 +237,57 @@ class PersonalArticleChatTests(TestCase):
         self.assertEqual(gateway.sent[0]['max_tokens'], 2048)
         self.assertIn('可以充分回答', gateway.sent[0]['messages'][0]['content'])
 
+    def test_production_sized_full_article_is_sent_without_safety_excerpt(self):
+        # /news/29386 stored about 21700 markdown characters with scope=full.
+        # That body is under the 30000 safety ceiling and must stay full evidence.
+        import json
+        from api.services.ai_article_chat import ARTICLE_EVIDENCE_PREAMBLE, CHAT_EVIDENCE_CHAR_CEILING
+
+        self.assertEqual(CHAT_EVIDENCE_CHAR_CEILING, 30000)
+        marker = 'END_OF_21700_ARTICLE'
+        body = ('x' * (21700 - len(marker))) + marker
+        self.assertEqual(len(body), 21700)
+        self.news.full_content = body
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        gateway = FakeGateway([gateway_frame('全文回答')])
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            response = self._chat(model=self.model, question='这篇文章讲了什么？')
+            self.assertEqual(response.status_code, 200)
+            wire = self._wire(response)
+        evidence = gateway.sent[0]['messages'][1]['content']
+        self.assertTrue(evidence.startswith(ARTICLE_EVIDENCE_PREAMBLE))
+        payload = json.loads(evidence[len(ARTICLE_EVIDENCE_PREAMBLE):])
+        self.assertEqual(len(payload['text']), 21700)
+        self.assertTrue(payload['text'].endswith(marker))
+        self.assertEqual(payload['text'].count('x'), 21700 - len(marker))
+        self.assertEqual(payload['evidence_policy'], 'full_article_body')
+        self.assertEqual(payload['context_scope'], 'full')
+        self.assertIn('"context_scope": "full"', wire)
+        self.assertNotIn('"context_scope": "excerpt"', wire)
+        self.assertNotIn('model_safety_excerpt', wire)
+
+        exact = 'E' * CHAT_EVIDENCE_CHAR_CEILING
+        self.news.full_content = exact
+        self.news.save(update_fields=['full_content'])
+        gateway = FakeGateway([gateway_frame('仍是全文')])
+        with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
+            response = self._chat(model=self.model, question='边界长度呢？')
+            self.assertEqual(response.status_code, 200)
+            self._wire(response)
+        exact_evidence = gateway.sent[0]['messages'][1]['content']
+        exact_payload = json.loads(exact_evidence[len(ARTICLE_EVIDENCE_PREAMBLE):])
+        self.assertEqual(len(exact_payload['text']), CHAT_EVIDENCE_CHAR_CEILING)
+        self.assertEqual(set(exact_payload['text']), {'E'})
+        self.assertEqual(exact_payload['evidence_policy'], 'full_article_body')
+        self.assertEqual(exact_payload['context_scope'], 'full')
+
     def test_overlong_article_is_safety_capped_not_reduced_to_a_faq_excerpt(self):
-        body = ('A' * 10050) + 'TAIL_MARKER'
+        import json
+        from api.services.ai_article_chat import ARTICLE_EVIDENCE_PREAMBLE, CHAT_EVIDENCE_CHAR_CEILING
+
+        self.assertEqual(CHAT_EVIDENCE_CHAR_CEILING, 30000)
+        body = ('A' * (CHAT_EVIDENCE_CHAR_CEILING + 50)) + 'TAIL_MARKER'
         self.news.full_content = body
         self.news.full_content_state = 'legacy'
         self.news.save(update_fields=['full_content', 'full_content_state'])
@@ -246,13 +295,17 @@ class PersonalArticleChatTests(TestCase):
         with patch('api.services.ai_article_chat.build_gateway_client', return_value=gateway):
             response = self._chat(model=self.model, question='What happened?')
             self.assertEqual(response.status_code, 200)
-            self._wire(response)
+            wire = self._wire(response)
         evidence = gateway.sent[0]['messages'][1]['content']
         self.assertEqual(gateway.sent[0]['max_tokens'], 2048)
-        self.assertIn('A' * 10000, evidence)
+        self.assertTrue(evidence.startswith(ARTICLE_EVIDENCE_PREAMBLE))
+        payload = json.loads(evidence[len(ARTICLE_EVIDENCE_PREAMBLE):])
+        self.assertEqual(len(payload['text']), CHAT_EVIDENCE_CHAR_CEILING)
+        self.assertEqual(set(payload['text']), {'A'})
         self.assertNotIn('TAIL_MARKER', evidence)
-        self.assertIn('"evidence_policy": "model_safety_excerpt"', evidence)
-        self.assertIn('"context_scope": "excerpt"', evidence)
+        self.assertEqual(payload['evidence_policy'], 'model_safety_excerpt')
+        self.assertEqual(payload['context_scope'], 'excerpt')
+        self.assertIn('"context_scope": "excerpt"', wire)
         self.assertIn('模型安全上限', gateway.sent[0]['messages'][0]['content'])
 
     def test_unknown_cross_owner_model_rejected_before_history_and_network(self):
