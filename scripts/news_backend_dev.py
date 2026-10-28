@@ -1,6 +1,7 @@
 """Explicit `news-server dev` mode, sharing news_dev's Linux process primitives."""
 from __future__ import annotations
 
+import getpass
 import json
 import os
 from pathlib import Path
@@ -9,10 +10,12 @@ import select
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
 import uuid
+import warnings
 
 import news_dev as control
 
@@ -58,7 +61,42 @@ def python_command(directory):
     return python
 
 
+def read_key(*, prompt=False):
+    """Only a dedicated private file or explicit hidden TTY prompt; never env values/argv."""
+    path = os.environ.get('NEWSHUB_DEV_KEY_FILE')
+    key = None
+    if path:
+        try:
+            source = runtime.external_path(path)
+            if source.name == '.env' or source.name.startswith('.env.'):
+                raise ValueError('not a dedicated key file')
+            fd = control.safe_open(source, os.O_RDONLY | os.O_NONBLOCK)
+            with os.fdopen(fd, 'rb') as handle:
+                info = os.fstat(handle.fileno())
+                if info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600:
+                    raise ValueError('private unlinked file required')
+                raw = handle.read(4099)
+                if len(raw) > 4098:
+                    raise ValueError('oversized key file')
+                key = raw.decode('ascii').rstrip('\r\n')
+        except (OSError, ValueError, control.LaunchError):
+            raise control.LaunchError('Key input must be a dedicated owned 0600 file outside Git, without links; input not logged.') from None
+    elif prompt:
+        if not sys.stdin.isatty():
+            raise control.LaunchError('Use a private NEWSHUB_DEV_KEY_FILE or an interactive terminal for import-key.')
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter('error', getpass.GetPassWarning)
+                key = getpass.getpass('Development API Key (hidden): ')
+        except (getpass.GetPassWarning, EOFError):
+            raise control.LaunchError('Hidden key input unavailable; nothing imported.') from None
+    if key is not None and (not 8 <= len(key) <= 4096 or any(ord(char) <= 32 or ord(char) >= 127 for char in key)):
+        raise control.LaunchError('Invalid development key input; value not logged.')
+    return key
+
+
 def initialize(directory, python):
+    key = read_key()
     marker = directory / 'instance.json'
     if not marker.exists():
         if set(path.name for path in directory.iterdir()) != {'control.lock'}:
@@ -72,17 +110,23 @@ def initialize(directory, python):
     for name in ('home', 'tmp', 'cache', 'media', 'chroma', 'tts'):
         control.private_directory(directory / name)
     run_manage(directory, python, ['migrate', '--noinput'], timeout=180)
-    print(f'独立合成数据库已初始化: {directory / "db.sqlite3"}')
+    run_manage(directory, python, ['dev_bootstrap', '--key-stdin'], timeout=60, key=key, show_output=True)
+    print(f'独立开发默认配置已初始化/保留: {directory / "db.sqlite3"}')
 
 
-def run_manage(directory, python, args, timeout):
+def run_manage(directory, python, args, timeout, *, key=None, show_output=False):
     api, ui = options()
     env = runtime.environment(directory, api, ui)
     fd = control.safe_open(directory / 'django.log', os.O_CREAT | os.O_WRONLY | os.O_APPEND)
     try:
+        # Secret contents travel only through a private stdin pipe, not argv/env/logs.
+        incoming = {'input': (key or '').encode('ascii')} if '--key-stdin' in args else {'stdin': subprocess.DEVNULL}
         result = subprocess.run([python, '-B', str(MANAGE), *args, f'--settings={runtime.PROFILE}'],
-                                cwd=BACKEND, env=env, stdin=subprocess.DEVNULL,
-                                stdout=fd, stderr=fd, timeout=timeout, umask=0o077)
+                                cwd=BACKEND, env=env, **incoming,
+                                stdout=subprocess.PIPE if show_output else fd, stderr=fd, timeout=timeout, umask=0o077)
+        if show_output and result.stdout:
+            os.write(fd, result.stdout)
+            print(result.stdout.decode('utf-8', errors='replace'), end='')
     finally:
         os.close(fd)
     if result.returncode:
@@ -245,10 +289,10 @@ def start(directory, python):
 
 def main():
     action = sys.argv[1] if len(sys.argv) == 2 else 'help'
-    if action not in {'init', 'start', 'stop', 'restart', 'status', 'health', 'log'}:
-        print('用法: news-server dev {init|start|stop|restart|status|health|log}\n'
+    if action not in {'init', 'import-key', 'start', 'stop', 'restart', 'status', 'health', 'log'}:
+        print('用法: news-server dev {init|import-key|start|stop|restart|status|health|log}\n'
               '配置: NEWSHUB_DEV_PYTHON, NEWSHUB_DEV_BACKEND_PORT, NEWSHUB_DEV_FRONTEND_PORT, '
-              'NEWSHUB_DEV_INSTANCE, NEWSHUB_DEV_STATE_DIR')
+              'NEWSHUB_DEV_INSTANCE, NEWSHUB_DEV_STATE_DIR, NEWSHUB_DEV_KEY_FILE')
         return 0 if action in {'help', '-h', '--help'} else 2
     if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
         raise control.LaunchError('Linux pidfd support is required.')
@@ -276,10 +320,17 @@ def main():
             return 0
         options()
         python = python_command(directory)
-        if action == 'init':
+        if action in {'init', 'import-key'}:
             if record_at(directory):
-                raise control.LaunchError('Stop this instance before explicit init/migrate.')
-            initialize(directory, python)
+                raise control.LaunchError('Stop this instance before explicit init/import.')
+            if action == 'init':
+                initialize(directory, python)
+            else:
+                runtime.read_instance(directory)
+                if not (directory / 'db.sqlite3').is_file():
+                    raise control.LaunchError('Run dev init before importing a key.')
+                run_manage(directory, python, ['dev_bootstrap', '--key-stdin', '--existing-only'],
+                           timeout=60, key=read_key(prompt=True), show_output=True)
         else:
             if action == 'restart':
                 # Validate state/settings before stopping the existing instance.

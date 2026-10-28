@@ -71,6 +71,51 @@ bash scripts/news-dev stop
 bash scripts/news-server dev stop  # 精确停止本实例父/子进程，保留合成数据
 ```
 
+### 默认账号和模型候选（仅隔离开发）
+
+`news-server dev init` 迁移完成后，首次创建以下**公开开发默认值**：
+
+| 账号 | 权限 | 初始开发密码 | 私有模型候选 |
+|---|---|---|---|
+| `admin` | staff + superuser | `12345678` | `deepseek-flash` |
+| `user` | 普通用户，无管理员权限 | `12345678` | `deepseek-flash` |
+
+这不是生产账号策略。仅 `newsaggregator.dev_settings`、任务所有的外置 SQLite 和离线边界允许初始化；
+不会修改全局密码校验。请勿在生产或对公网开放的环境使用这些弱口令。
+
+两个账号各有独立 `UserAIConnection` 和模型配置，复用 `deepseek_default` 受信路由。
+现有 Proxy 对 `deepseek/deepseek-flash` 使用 `https://api.deepseek.com`，不在这里额外拼接 `/v1` 或新建 HTTP 客户端。
+连接初始禁用、能力未知，不创建探测成功记录或业务任务默认绑定；**候选已保存不等于模型/Key 可用**。
+此模式仍保持 AI/BYOK 和外部 I/O 关闭，AI 设置接口也仍受该开关保护；联网验证、Gateway/Redis 接入及业务启用需另行授权。
+
+普通 `init` 不要求输入 Key：未提供安全输入时，输出每个账号 `key: missing`，完成账号和候选配置即可。
+要导入到两个账号，先停本实例，再显式运行隐藏输入：
+
+```bash
+bash scripts/news-server dev stop
+bash scripts/news-server dev import-key  # 仅交互终端隐藏读取，不在普通 init 自动询问
+```
+
+也可由密码管理器/受保护编辑器准备一个**仓库外、本人所有、0600、无软/硬链接**的专用文件，内容只含一行 Key：
+
+```bash
+# 变量只保存文件路径，不保存 Key；不要将真实 Key 放入命令行、.env、代码或日志。
+export NEWSHUB_DEV_KEY_FILE=/absolute/private/development-key
+bash scripts/news-server dev init        # 首次创建时加密导入；已有配置则保留
+# 或初始化后只补充仍未修改、从未导入过凭据的候选：
+bash scripts/news-server dev import-key
+```
+
+入口以私有 stdin 管道传递内容，子进程环境不携带 Key 或文件选择器。
+凭据用现有 owner/连接/版本绑定加密存储，两账号密文不同；首次补入旧空候选会推进 credential epoch/version/revision。
+现有 Key 即使与输入不同也不覆盖；撤销、删除、改过目标/模型或 epoch 的候选不会自动恢复。
+导入源文件由用户保管/移除，启动器不擅自删除；后续开发只需显式提供这个私有路径，仓库不会保存实际 Key。
+
+重复 `init` 不重置密码、提升权限、改名或覆盖模型、凭据、任务偏好。
+实例私有的 `defaults.json` 只记录用户/连接/模型身份，不含密码、Key 或密文；同名未知账号、同 owner 的连接冲突、
+删除后替换的对象、缺失/不完整回执均拒绝自动接管。初始化中断时保留证据，先检查或使用新的 instance，
+不要删除回执来冒充首次初始化。输出 `verification: not_run` 始终不代表真实 provider 验收。
+
 ### 后端隔离契约
 
 - `NEWSHUB_DEV_PYTHON` 未指定时仅检查本 worktree 的 `backend/venv/bin/python`。
@@ -97,7 +142,7 @@ bash scripts/news-server dev stop  # 精确停止本实例父/子进程，保留
   外来、陈旧或复制自其他实例的记录失败闭锁；先核对具体实例，不用删除目录或杀所有 Python 进程解决。
   外部强杀父进程留下的未知孤儿不被自动接管。
 
-`dev` 支持 `init/start/stop/restart/status/health/log`。后端默认端口29527、前端受信端口25173；
+`dev` 支持 `init/import-key/start/stop/restart/status/health/log`。后端默认端口29527、前端受信端口25173；
 其他 instance/state 变量与前端一致。配置变更用 `restart`；模型/长任务和依赖服务接入属于另行授权的验收范围。
 `health` 只证明本实例进程身份和 listener，不代表全部API、worker、RSS或provider健康。
 
@@ -136,6 +181,8 @@ NEWSHUB_TEST_NODE22="$NEWSHUB_DEV_NODE" /path/to/python3.12 tests/backend/test_n
 # 后端生命周期合成进程负例＋真实settings隔离契约，不读取现有数据。
 # 使用完整CI-lock环境，避免真实settings用例因缺少Django被明确SKIP。
 "$NEWSHUB_DEV_PYTHON" tests/backend/test_news_backend_dev.py
+# 真实Django、一次迁移的合成schema及独立SQLite backup；账号/owner/epoch/幂等/脱敏回归。
+"$NEWSHUB_DEV_PYTHON" tests/backend/test_dev_bootstrap.py
 
 # 根据本次行为改动选择前端测试，不默认跑所有测试。
 # 从 frontend/、在兼容 Node22 环境中执行：

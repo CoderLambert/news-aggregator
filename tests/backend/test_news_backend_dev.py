@@ -42,6 +42,11 @@ if 'migrate' in sys.argv:
     with sqlite3.connect(os.environ['DJANGO_DB_PATH']) as db:
         db.execute('create table if not exists synthetic (id integer)')
     sys.exit(0)
+if 'dev_bootstrap' in sys.argv:
+    supplied = sys.stdin.buffer.read()
+    (state / 'bootstrap-input.json').write_text(json.dumps({'length': len(supplied), 'argv': sys.argv, 'env': dict(os.environ)}))
+    print('synthetic bootstrap completed')
+    sys.exit(0)
 if os.environ.get('RUN_MAIN') != 'true':
     while True:
         child = subprocess.run([sys.executable, '-B', *sys.argv], env=dict(os.environ, RUN_MAIN='true'))
@@ -286,6 +291,42 @@ class BackendIsolationTests(unittest.TestCase):
         self.assertTrue(all(result.returncode == 0 for result in results))
         self.assertFalse(Path(f'/proc/{child}').exists())
         self.assertFalse((directory / 'process.json').exists())
+
+    def test_private_key_file_uses_stdin_not_environment_or_argv(self):
+        key = self.base / 'development-key'
+        sentinel = 'synthetic-input-only-no-provider'
+        key.write_text(sentinel + '\n')
+        key.chmod(0o600)
+        result = self.call('init', NEWSHUB_DEV_KEY_FILE=str(key), OPENAI_API_KEY='ignored-host-key')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        directory = next((self.base / 'state').glob('*/backend'))
+        data = json.loads((directory / 'bootstrap-input.json').read_text())
+        self.assertEqual(data['length'], len(sentinel))
+        self.assertNotIn(sentinel, json.dumps(data))
+        self.assertNotIn('NEWSHUB_DEV_KEY_FILE', data['env'])
+        self.assertNotIn('OPENAI_API_KEY', data['env'])
+        self.assertNotIn(sentinel, result.stdout + result.stderr + (directory / 'django.log').read_text())
+        self.assertEqual(self.call('import-key', NEWSHUB_DEV_KEY_FILE=str(key)).returncode, 0)
+
+    def test_key_input_rejects_public_symlink_hardlink_dotenv_and_non_tty(self):
+        directory = self.prepare()
+        key = self.base / 'development-key'
+        key.write_text('synthetic-input-only-no-provider')
+        key.chmod(0o644)
+        self.assertNotEqual(self.call('import-key', NEWSHUB_DEV_KEY_FILE=str(key)).returncode, 0)
+        key.chmod(0o600)
+        link = self.base / 'linked-key'
+        link.symlink_to(key)
+        self.assertNotEqual(self.call('import-key', NEWSHUB_DEV_KEY_FILE=str(link)).returncode, 0)
+        link.unlink()
+        os.link(key, link)
+        self.assertNotEqual(self.call('import-key', NEWSHUB_DEV_KEY_FILE=str(key)).returncode, 0)
+        link.unlink()
+        dotenv = self.base / '.env'
+        key.rename(dotenv)
+        self.assertNotEqual(self.call('import-key', NEWSHUB_DEV_KEY_FILE=str(dotenv)).returncode, 0)
+        self.assertNotEqual(self.call('import-key').returncode, 0)
+        self.assertEqual((directory / 'db.sqlite3').stat().st_mode & 0o777, 0o600)
 
     def test_io_guard_blocks_outbound_and_unrelated_subprocesses(self):
         code = (f'import sys,socket,subprocess; sys.path.insert(0,{str(self.root / "backend")!r}); '
