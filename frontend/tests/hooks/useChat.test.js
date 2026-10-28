@@ -106,13 +106,15 @@ describe('useChat', () => {
     api.fetchChatHistory.mockResolvedValue({ messages: [] })
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-    await act(async () => { await result.current.doSend('Question') })
+    act(() => result.current.setInput('Question'))
+    await act(async () => { await result.current.handleSend() })
     expect(result.current.phase).toBe('error')
     expect(result.current.uncertainTurn).not.toBeNull()
     expect(result.current.messages[1].content).toContain('partial without receipt')
+    expect(result.current.input).toBe('Question')
   })
 
-  it('streams one user/assistant pair and clears the submitted draft only on success', async () => {
+  it('streams one user/assistant pair and clears the submitted draft when send is accepted', async () => {
     api.chatStream.mockReturnValue((async function* () { yield 'Hel'; yield 'lo!'; yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n' })())
     const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
@@ -125,6 +127,70 @@ describe('useChat', () => {
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', content: 'Hello!' })
     expect(result.current.input).toBe('')
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it('clears the input as soon as send is accepted and keeps a draft when send is blocked', async () => {
+    let release
+    api.chatStream.mockImplementation(async function* () {
+      yield 'partial'
+      await new Promise((resolve) => { release = resolve })
+      yield ' done'
+      yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n'
+    })
+    const { result } = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+
+    act(() => result.current.setInput('   '))
+    await act(async () => { expect(await result.current.handleSend()).toBe(false) })
+    expect(result.current.input).toBe('   ')
+    expect(api.chatStream).not.toHaveBeenCalled()
+
+    act(() => result.current.setInput('  这个技术的价值和应用场景在哪  '))
+    let sendPromise
+    act(() => { sendPromise = result.current.handleSend() })
+    await waitFor(() => expect(result.current.phase).toBe('streaming'))
+    expect(result.current.input).toBe('')
+    expect(result.current.messages[0]).toMatchObject({
+      role: 'user', content: '这个技术的价值和应用场景在哪',
+    })
+
+    act(() => result.current.setInput('这个技术的价值和应用场景在哪'))
+    await expect(result.current.handleSend()).resolves.toBe(false)
+    await expect(result.current.doSend('另一条建议问题')).resolves.toBe(false)
+    expect(result.current.input).toBe('这个技术的价值和应用场景在哪')
+    expect(api.chatStream).toHaveBeenCalledOnce()
+
+    act(() => release())
+    await act(async () => { await sendPromise })
+    expect(result.current.input).toBe('这个技术的价值和应用场景在哪')
+    expect(result.current.messages[1].content).toBe('partial done')
+
+    api.chatStream.mockImplementation(async function* () {
+      yield 'suggestion answer'
+      yield '\u200b__META__{"type":"chat_turn","status":"complete"}__META__\n\n'
+    })
+    await act(async () => { expect(await result.current.doSend('建议问题')).toBe(true) })
+    expect(result.current.input).toBe('这个技术的价值和应用场景在哪')
+  })
+
+  it('keeps the draft when billing consent or a clear confirmation blocks send', async () => {
+    const blocked = renderHook(
+      () => useChat('42', true, '22222222-2222-4222-8222-222222222222', false),
+      { wrapper: makeWrapper() },
+    )
+    await waitFor(() => expect(blocked.result.current.isLoading).toBe(false))
+    act(() => blocked.result.current.setInput('未同意计费的问题'))
+    await act(async () => { expect(await blocked.result.current.handleSend()).toBe(false) })
+    expect(blocked.result.current.input).toBe('未同意计费的问题')
+
+    const confirming = renderHook(() => useChat('42', true), { wrapper: makeWrapper() })
+    await waitFor(() => expect(confirming.result.current.isLoading).toBe(false))
+    act(() => confirming.result.current.setInput('清空确认中'))
+    act(() => confirming.result.current.requestClearChat())
+    await act(async () => { expect(await confirming.result.current.handleSend()).toBe(false) })
+    expect(confirming.result.current.confirmingClear).toBe(true)
+    expect(confirming.result.current.input).toBe('清空确认中')
+    expect(api.chatStream).not.toHaveBeenCalled()
   })
 
   it('reassembles split web-search metadata and preserves streamed Markdown exactly', async () => {
