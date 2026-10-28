@@ -363,11 +363,14 @@ def test_production_compose_flag_defaults_ignore_dotenv_and_allow_explicit_value
         assert {key: environment[key] for key in explicit_values} == explicit_values
 
 
-def test_worker_healthcheck_commands_fail_when_heartbeat_is_missing(monkeypatch):
+def test_worker_healthcheck_commands_fail_when_heartbeat_is_missing(monkeypatch, settings):
     from django.core.management.base import CommandError
 
     from api.management.commands import embedding_healthcheck
 
+    settings.SEMANTIC_SEARCH_ENABLED = True
+    settings.PUBLIC_SITE_MODE = 'full'
+    settings.PUBLIC_AI_ENABLED = True
     monkeypatch.setattr(
         embedding_healthcheck,
         'get_search_index_settings',
