@@ -1,19 +1,21 @@
 ---
 name: newshub-stage-commit
-description: "Locally commit a completed NewsHub stage through Luna xhigh; push only after the user acceptance gate."
+description: "Locally commit a completed NewsHub stage directly or with optional delegation; push only after the user acceptance gate."
 ---
 
 # NewsHub stage commit
 
 Use after a feature or independently reviewable implementation/documentation stage is complete and its applicable minimum checks pass, before the next stage or handoff. This grants a local commit for that stage only. Default to local-only delivery. A push, PR creation/promotion or CI dispatch must wait for the root AGENTS.md user-acceptance gate; this Skill does not supply that authorization. An earlier stage's acceptance does not carry over to new or changed behavior. A newer read-only/no-commit/pause instruction blocks the commit; no-push/local-only blocks only the push. No empty commits: failed required checks mean incomplete, and a recovery patch does not replace the commit.
 
-## Delegate
+## Execution choice
 
-Unless the request includes `ROLE=delegated-stage-commit`, the main Agent must spawn exactly one child with `fork_turns=none`, model `gpt-6-luna`, and `reasoning_effort=xhigh`. Provide the absolute worktree, task/stage ID and boundary, allowed files or hunks and exclusions, expected branch/base SHA, applicable checks and candidate-bound evidence, and explicit local-only or user-accepted push authorization to the current work branch or an isolated task branch described below. If Luna, xhigh, or delegation is unavailable, stop without downgrade. A worker with the role executes directly and never re-delegates.
+The current agent may commit directly after the checks below. Delegate when useful; no particular model, reasoning level or delegate count is required. Keep a clear writer for the index and refs so executors do not race.
+
+Record the absolute worktree, task/stage ID, allowed files or hunks and exclusions, expected branch/base SHA, candidate-bound check evidence and local-only or user-accepted push authorization. If delegating, pass this context and verify the resulting commit and remaining dirty state before handoff. Unavailable optional agents do not block direct execution.
 
 ## Commit the stage
 
-Read applicable `AGENTS.md` files. Confirm worktree, branch and exact base SHA match the handoff; inspect staged, unstaged and untracked changes. If they changed, there are unrelated pre-staged edits, a conflict, a suspected secret, or uncertain ownership, preserve the work and report the blocker. Never reset, clean, stash, amend, rebase, merge or force-push.
+Read applicable `AGENTS.md` files. Confirm worktree, branch and exact base SHA match the recorded task context; inspect staged, unstaged and untracked changes. If they changed, there are unrelated pre-staged edits, a conflict, a suspected secret, or uncertain ownership, preserve the work and report the blocker. Never reset, clean, stash, amend, rebase, merge or force-push.
 
 Stage only authorized files or reviewed hunks; never use `git add .` or `git add -A`. Split unrelated hunks, or stop if they cannot be separated. Inspect status, staged diff/stat and `git diff --cached --check`; review for secrets without printing suspected values. Reuse validation only while it still matches the candidate, run missing applicable checks, and always run `git diff --check`. A required failure stops before commit.
 

@@ -172,6 +172,65 @@ class RepositoryAgentContractTests(unittest.TestCase):
                 self.assertIn('build-release-policy.md', (ROOT / relative).read_text())
         self.assertIn('/.worktrees/', (ROOT / '.gitignore').read_text().splitlines())
 
+    def test_workflow_skills_allow_direct_execution_without_mandatory_delegate(self):
+        root_rules = (ROOT / 'AGENTS.md').read_text()
+        validation = root_rules.split('## Validation and delivery', 1)[1]
+        self.assertIn('agents may execute directly', validation)
+        self.assertIn('agent count are task choices', validation)
+        self.assertIn('project-local Skills take precedence', validation)
+        for name in ('newshub-test-acceptance', 'newshub-stage-commit', 'newshub-release-delivery'):
+            relative = f'.agents/skills/{name}/SKILL.md'
+            with self.subTest(skill=name):
+                self.assertIn(name, rules.SKILL_NAMES)
+                self.assertIn(relative, root_rules)
+                text = (ROOT / relative).read_text()
+                self.assertIn('current agent may', text)
+                self.assertNotRegex(text + validation,
+                                    r'(?i)must spawn|exactly one|one pinned|If Luna|BLOCKED without fallback')
+
+    def test_execution_choice_preserves_authorization_and_safety_contracts(self):
+        root_rules = (ROOT / 'AGENTS.md').read_text()
+        for guard in ('Local-first acceptance', 'Unknown authorization fails closed',
+                      'credential_epoch', 'A closed connection/EOF is not successful SSE completion',
+                      'Failed checks stop delivery', 'merge-gate', 'SKIPPED/NOT_RUN/BLOCKED'):
+            with self.subTest(guard=guard):
+                self.assertIn(guard, root_rules)
+        acceptance = (ROOT / '.agents/skills/newshub-test-acceptance/SKILL.md').read_text()
+        self.assertIn('Do not read real `.env` files', acceptance)
+        self.assertIn('Do not weaken tests', acceptance)
+        commit = (ROOT / '.agents/skills/newshub-stage-commit/SKILL.md').read_text()
+        self.assertIn('no-push/local-only blocks only the push', commit)
+        self.assertIn('A required failure stops before commit', commit)
+        self.assertIn('Never reset, clean, stash, amend, rebase, merge or force-push', commit)
+        release = (ROOT / '.agents/skills/newshub-release-delivery/SKILL.md').read_text()
+        for guard in ('Production deployment', 'expected-head-guarded', 'skipped/missing is not PASS',
+                      'No reset/stash/autostash', 'Return to local acceptance for new fixes'):
+            with self.subTest(guard=guard):
+                self.assertIn(guard, release)
+        # Local image builds retain their separate, explicitly authorized tool contract.
+        self.assertIn('docs/development/pi-local-image-builder.md', root_rules)
+        policy = (ROOT / 'docs/development/pi-local-image-builder.md').read_text()
+        self.assertIn('openai-codex/gpt-6-luna', policy)
+        self.assertIn('explicit', policy.lower())
+
+    def test_project_release_skill_cannot_bypass_structure_validation(self):
+        name = 'newshub-release-delivery'
+        self.assertIn(name, rules.SKILL_NAMES)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ValidatorUnitTests().synthetic_repository(root)
+            path = root / f'.agents/skills/{name}/SKILL.md'
+            valid = path.read_text()
+            for invalid in (valid.replace(f'name: {name}', 'name: different'),
+                            valid + '[escape](../../../../outside.md)\n'):
+                with self.subTest(invalid=invalid):
+                    path.write_text(invalid)
+                    self.assertTrue(any(f'.agents/skills/{name}/SKILL.md:' in error
+                                        for error in rules.check_repository(root)))
+            path.unlink()
+            self.assertTrue(any(f'.agents/skills/{name}/SKILL.md: missing document' in error
+                                for error in rules.check_repository(root)))
+
     def test_frontend_and_backend_validation_entrypoints_exist(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         preflight = workflow.split('name: Fast cross-stack syntax preflight', 1)[1].split('      - name:', 1)[0]
