@@ -42,31 +42,66 @@ bash scripts/news-dev stop
   只做获授权的验收操作；新后端源码并不会因此生效。
 - 浏览器 origin 必须在后端 CSRF 信任名单内。端口不同不等于 Cookie 隔离；独立后端需独立浏览器配置文件。
 
-## 模式 B：前端源码＋独立的源码后端（后端须另行准备）
+## 模式 B：前端源码＋独立源码后端
+
+在**当前源码 worktree 根目录**执行。后端沿用 `news-server`，但必须显式带 **`dev`**：
+旧 `news-server start` 是历史入口，不具备下面的隔离保证。
 
 ```bash
+# 选择已存在、完整匹配 backend/requirements-ci.lock 的 Python 3.12 环境。
+export NEWSHUB_DEV_PYTHON=/path/to/compatible-venv/bin/python
 export NEWSHUB_DEV_INSTANCE=isolated-api
-export NEWSHUB_DEV_PORT=25173
-export NEWSHUB_DEV_API_TARGET=http://127.0.0.1:29527
+export NEWSHUB_DEV_STATE_DIR="$HOME/.local/state/newshub-dev"
+export NEWSHUB_DEV_BACKEND_PORT=29527
+export NEWSHUB_DEV_FRONTEND_PORT=25173
+export NEWSHUB_DEV_PORT="$NEWSHUB_DEV_FRONTEND_PORT"
+export NEWSHUB_DEV_API_TARGET="http://127.0.0.1:$NEWSHUB_DEV_BACKEND_PORT"
+
+# 仅首次初始化，或明确要应用新迁移时运行；只操作任务所有的合成数据库。
+bash scripts/news-server dev init
+bash scripts/news-server dev start
 bash scripts/news-dev start
+bash scripts/news-server dev health
+bash scripts/news-dev health
+# 用独立浏览器配置文件打开 http://127.0.0.1:25173
+# backend Python 保存后 Django 自动重载；frontend/src 保存后 Vite HMR。
+
+bash scripts/news-server dev log   # 输出最近32KiB，不跟随、不阻塞控制器
+bash scripts/news-dev stop
+bash scripts/news-server dev stop  # 精确停止本实例父/子进程，保留合成数据
 ```
 
-启动器**只管理前端**，不会启动 Django、迁移数据库或创建依赖服务。模式 B 使用前必须完成：
+### 后端隔离契约
 
-1. 独立、兼容的 Python 3.12 环境和任务专用数据库／缓存／运行目录。
-2. 受控环境白名单；不要加载现有根目录或 `backend/.env` 的凭据。
-   Django 开发模式会自动读取它们，详见 [`settings.py`](../backend/newsaggregator/settings.py)。
-3. 显式设置独立 `DJANGO_DB_PATH`、`CHROMA_DATA_DIR`、`TTS_CACHE_DIR`、deployment-id 路径。
-   **不得使用现有 `backend/db.sqlite3` 或复制运行中的 DB/WAL。**
-4. 后端监听 `127.0.0.1:29527`，CSRF 信任 `http://127.0.0.1:25173`，使用独立浏览器配置文件。
-5. RSS／channel／embedding worker 按需启动，隔离锁、heartbeat、账号及运行状态；源码变化后独立重启。
-   Redis／Gateway 在现有 app 网络命名空间内，不代表宿主可以直接连接。
+- `NEWSHUB_DEV_PYTHON` 未指定时仅检查本 worktree 的 `backend/venv/bin/python`。
+  每次 init/start 校验 Python 3.12 和完整 CI lock，不回退到宿主 Python，不自动安装。
+  兼容环境优先复用；缺失时才在独立/内容寻址环境中按原 lock 一次性准备，不升级依赖或覆盖共享 venv。
+- 控制器复用 [`news_dev.py`](../scripts/news_dev.py) 的私有文件、锁、身份和 pidfd 原语。
+  后端数据位于同一 worktree-hash＋instance 目录的 `backend/` 子目录；前端状态不会被 stop/restart 接管。
+  运行目录必须在 **Git worktree 之外**、无 symlink；目录0700、文件0600，拒绝 hardlink/外来文件。
+- `init` 创建所有权标记、独立随机开发密钥和新 SQLite，然后显式迁移；不接管已有未知 DB，
+  不读取/复制真实 `.env`、`backend/db.sqlite3` 或 WAL。已有本任务合成 DB 可在停服后显式再次 `init`。
+  `start` 从不隐式迁移；迁移失败保留任务证据，不自动清库。
+- [`dev_settings.py`](../backend/newsaggregator/dev_settings.py) 在导入普通设置前验证所有权并重建白名单环境。
+  不继承 provider、Redis、Gateway、代理或 Python 路径/重载标志；dotenv 在此模式明确禁用。
+  **不要给入口传 `DJANGO_DB_PATH`、`CHROMA_DATA_DIR` 等应用数据路径**：误传时拒绝，不会静默访问它们。
+  DB、Chroma/TTS/cache、临时目录、锁、heartbeat、deployment-id 均固定到本实例；普通运行设置不受影响。
+- 仅绑定 `127.0.0.1` 的指定新端口；冲突拒绝启动，禁止使用9527/19527。
+  CSRF 精确信任上述两个 origin，不用通配符；CORS 也限定为这两个 origin。
+  会话 Cookie 按实例区分，但 SPA 的 `csrftoken` 仍是 host 作用域：**不同端口不隔离 Cookie，必须使用独立浏览器配置文件**。
+- 默认允许本地合成账号/普通页面操作，但 AI/BYOK、订阅连接/推理、语义搜索、TTS、模型预加载及自动内容worker关闭。
+  不启动 RSS/channel/embedding worker，也不接入真实 Miniflux/Redis/Gateway；网络连接及非重载子命令会被开发配置拒绝。
+  RSS同步、正文抓取等依赖外部服务的路径不可用于真实验收。此保护用于防误操作，不是对抗恶意源码的安全沙盒。
+- Django 自己设置 reload-child 的 `RUN_MAIN`；入口不预设它。停止时先验证并暂停重载父进程，
+  再逐一校验/用 pidfd 停止子进程，最后结束父进程，不用 `pkill`/`killpg`。
+  外来、陈旧或复制自其他实例的记录失败闭锁；先核对具体实例，不用删除目录或杀所有 Python 进程解决。
+  外部强杀父进程留下的未知孤儿不被自动接管。
 
-Django `runserver` 有代码重载；`start_waitress.py` 没有。不要向 runserver 预设 `RUN_MAIN=true`，
-它是 Django 重载器内部标志。长任务调试可使用受控的 `--noreload` 会话，避免保存代码中断执行。
-当前阶段不提供一键后端启动，也不自动开启真实 AI／订阅调用。
+`dev` 支持 `init/start/stop/restart/status/health/log`。后端默认端口29527、前端受信端口25173；
+其他 instance/state 变量与前端一致。配置变更用 `restart`；模型/长任务和依赖服务接入属于另行授权的验收范围。
+`health` 只证明本实例进程身份和 listener，不代表全部API、worker、RSS或provider健康。
 
-## 命令和状态隔离
+## 前端命令和状态隔离
 
 兼容命令：`start`、`stop`、`restart`、`status`、`health`、`build`、`log`。
 
@@ -98,6 +133,9 @@ Vite 缓存。目录0700、文件0600。使用 Vite 的 native ESM config loader
 ```bash
 # 标准库合成启动器回归；用已有 Python3.12 环境执行，不加载 Django conftest。
 NEWSHUB_TEST_NODE22="$NEWSHUB_DEV_NODE" /path/to/python3.12 tests/backend/test_news_dev.py
+# 后端生命周期合成进程负例＋真实settings隔离契约，不读取现有数据。
+# 使用完整CI-lock环境，避免真实settings用例因缺少Django被明确SKIP。
+"$NEWSHUB_DEV_PYTHON" tests/backend/test_news_backend_dev.py
 
 # 根据本次行为改动选择前端测试，不默认跑所有测试。
 # 从 frontend/、在兼容 Node22 环境中执行：

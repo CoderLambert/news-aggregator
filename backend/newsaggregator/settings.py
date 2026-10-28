@@ -25,7 +25,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # file. In particular, a production process never reads a workspace .env.
 DJANGO_ENV = resolve_django_environment(os.environ)
 os.environ.setdefault('DJANGO_ENV', DJANGO_ENV)
-if DJANGO_ENV == 'development':
+# The isolated source profile constructs its own environment before this import.
+if DJANGO_ENV == 'development' and os.environ.get('NEWSHUB_SKIP_DOTENV') != '1':
     try:
         from dotenv import load_dotenv
         for _candidate in (BASE_DIR.parent / '.env', BASE_DIR / '.env'):

@@ -4,6 +4,11 @@ set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# Explicit isolated source mode; dispatch before legacy logs/PIDs/data are touched.
+if [[ "${1:-}" == dev ]]; then
+  shift
+  exec python3 "$SCRIPT_DIR/news_backend_dev.py" "$@"
+fi
 LOG_DIR="$PROJECT/logs"
 LOG="$LOG_DIR/django.log"
 PID_FILE="$LOG_DIR/django.pid"

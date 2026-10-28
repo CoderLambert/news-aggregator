@@ -128,9 +128,9 @@ def owned(record):
             and identity(expected.get('pid')) == expected)
 
 
-def owns_listener(record):
+def owns_listener(record, owner=None):
     """Check the managed PID owns this exact loopback listener, not a stranger."""
-    if not owned(record):
+    if not (owner or owned)(record):
         return False
     try:
         proc = Path('/proc') / str(record['identity']['pid'])
@@ -180,7 +180,7 @@ def save_record(directory, record):
     os.replace(directory / 'process.json.tmp', directory / 'process.json')
 
 
-def terminate(record):
+def terminate(record, owner=None):
     """Pin the process with pidfd before identity checks; never signal a reused PID."""
     if not record:
         return
@@ -189,7 +189,7 @@ def terminate(record):
     except ProcessLookupError:
         return
     try:
-        if not owned(record):
+        if not (owner or owned)(record):
             raise LaunchError('Process identity mismatch; refusing to signal it.')
         signal.pidfd_send_signal(fd, signal.SIGTERM)
         if not select.select([fd], [], [], 8)[0]:
