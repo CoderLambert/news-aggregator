@@ -5,6 +5,13 @@ import uuid
 from unittest.mock import Mock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def enable_semantic_paths(settings):
+    # These existing regressions exercise enabled semantics, not the new default.
+    settings.SEMANTIC_SEARCH_ENABLED = True
+
 from django.contrib.auth.models import User
 from django.test import RequestFactory, override_settings
 from django.urls import reverse

@@ -1,17 +1,17 @@
 ---
 name: newshub-test-acceptance
-description: "Run requested NewsHub tests or local acceptance through one reusable GPT-6 Luna xhigh task."
+description: "Run requested NewsHub tests or local acceptance directly or with optional delegation, reusing compatible environments and candidate-bound evidence."
 ---
 
 # NewsHub test acceptance
 
 Use whenever the user asks to test, verify, reproduce, regression-check or locally accept a NewsHub change. Routine planning questions about tests do not trigger this Skill.
 
-## Delegate
+## Execution choice
 
-The main Agent must spawn exactly one `newshub-test-acceptance-luna` task agent. Its persistent definition pins `openai-codex/gpt-6-luna` with `xhigh` reasoning. Do not substitute another agent/model, split one acceptance run among multiple agents, or rerun the same successful checks in the main Agent. If that agent or configuration is unavailable, stop without downgrade.
+The current agent may run acceptance directly. Delegate when useful for the task; model, reasoning level and delegate count are choices, not prerequisites. Reuse compatible evidence rather than repeating successful checks because the executor changed. Missing an optional agent is not a blocker to direct execution.
 
-Provide the absolute repository/worktree, requested behavior and acceptance boundary, branch plus exact candidate SHA or dirty-file state, applicable checks already run, exclusions, and whether provider, image, full-suite, CI or production gates have explicit authorization. The delegate must read the repository test and verification rules before acting.
+Read [test rules](../../../tests/AGENTS.md) and [verification](../newshub-verify/SKILL.md). Record the absolute repository/worktree, requested behavior, acceptance boundary, branch and candidate SHA or dirty state, prior checks, exclusions and authorization for provider/image/full-suite/CI/production gates. If delegating, pass this context, isolate mutable resources and verify the returned evidence before reporting completion.
 
 ## Reuse the test environment
 
@@ -35,4 +35,4 @@ Never run `pip install`, `npm ci`, package downloads, Docker pulls or image rebu
 - Do not weaken tests, install into shared project environments, or edit production code unless implementation was also explicitly requested.
 - Report candidate SHA/dirty state; reused environment identity and compatibility evidence; exact commands, scope, exits and warnings; PASS/FAIL/BLOCKED/NOT_RUN separately; cleanup; risks and the next authorized gate. Skipped or synthetic checks are never provider, production, CI or human-UAT proof.
 
-Reusable invocation: `/skill:newshub-test-acceptance`, or ask “用 Luna xhigh 验证这次修改”。
+Reusable invocation: `/skill:newshub-test-acceptance`, or ask “验证这次修改”。

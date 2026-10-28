@@ -1,5 +1,6 @@
 """HTTP-level feature and read-only gates for the public API."""
 from django.conf import settings
+from api.services.semantic_search import semantic_search_enabled
 from django.http import HttpResponseNotFound, JsonResponse
 from django.urls import Resolver404, resolve
 import json
@@ -89,7 +90,7 @@ class PublicPolicyMiddleware:
                 response['Cache-Control'] = 'no-store'
                 return response
         if (route_name == 'news-list' and request.method in READ_ONLY_METHODS
-                and (settings.PUBLIC_SITE_MODE == 'read_only' or not settings.PUBLIC_AI_ENABLED)):
+                and not semantic_search_enabled()):
             if request.GET.get('mode') not in (None, 'keyword'):
                 return policy_error('semantic_search_disabled')
         if route_name == 'auth-register' and not settings.PUBLIC_SIGNUP_ENABLED:

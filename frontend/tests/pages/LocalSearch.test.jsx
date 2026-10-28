@@ -6,7 +6,7 @@ import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import { fetchNews } from '@/services/api'
 import LocalSearch from '@/pages/LocalSearch'
-import { CapabilitiesTestProvider } from '../helpers/capabilities'
+import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilities'
 
 vi.mock('@/services/api', () => ({ fetchNews: vi.fn() }))
 
@@ -31,12 +31,12 @@ function RouteProbe() {
   )
 }
 
-function renderSearch(initialEntries, initialIndex) {
+function renderSearch(initialEntries, initialIndex, capabilities = fullCapabilities()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } })
   const user = { id: 12, username: 'reader' }
   return render(
     <QueryClientProvider client={client}>
-      <CapabilitiesTestProvider client={client}>
+      <CapabilitiesTestProvider client={client} value={capabilities}>
         <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
           <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
             <LocalSearch />
@@ -52,6 +52,42 @@ beforeEach(() => {
   vi.clearAllMocks()
   usePreferencesStore.setState({ lang: 'zh' })
   fetchNews.mockResolvedValue({ count: 61, next: null, previous: null, results: [article] })
+})
+
+describe('LocalSearch semantic search capability in full mode', () => {
+  it.each(['disabled', 'unknown'].flatMap((capability) =>
+    ['semantic', 'hybrid', undefined].map((mode) => ({ capability, mode })),
+  ))('uses only keyword requests with $capability capability and URL mode $mode', async ({ capability, mode }) => {
+    const capabilities = fullCapabilities({ semantic_search: false })
+    if (capability === 'unknown') delete capabilities.features.semantic_search
+    else capabilities.features.semantic_search.reason = 'semantic_search_disabled'
+    renderSearch([`/search?q=climate${mode ? `&mode=${mode}` : ''}`], undefined, capabilities)
+
+    expect(await screen.findByRole('heading', { name: article.title })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关键词' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('button', { name: '语义' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '混合' })).not.toBeInTheDocument()
+    if (mode) expect(screen.getByTestId('route')).toHaveTextContent('mode=keyword')
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'keyword update' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'keyword update', mode: 'keyword' }), expect.any(AbortSignal),
+    ))
+    expect(screen.getByTestId('route')).toHaveTextContent('mode=keyword')
+    expect(fetchNews.mock.calls.every(([params]) => params.mode === 'keyword')).toBe(true)
+  })
+
+  it.each([['semantic', '语义'], ['hybrid', '混合']])('keeps %s selectable when enabled', async (mode, label) => {
+    renderSearch(['/search?q=climate&mode=keyword'], undefined, fullCapabilities({ semantic_search: true }))
+    expect(await screen.findByRole('heading', { name: article.title })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: label }))
+    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'climate', mode }), expect.any(AbortSignal),
+    ))
+    expect(screen.getByTestId('route')).toHaveTextContent(`mode=${mode}`)
+  })
 })
 
 describe('LocalSearch Query and URL state', () => {

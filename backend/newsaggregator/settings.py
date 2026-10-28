@@ -25,7 +25,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # file. In particular, a production process never reads a workspace .env.
 DJANGO_ENV = resolve_django_environment(os.environ)
 os.environ.setdefault('DJANGO_ENV', DJANGO_ENV)
-if DJANGO_ENV == 'development':
+# The isolated source profile constructs its own environment before this import.
+if DJANGO_ENV == 'development' and os.environ.get('NEWSHUB_SKIP_DOTENV') != '1':
     try:
         from dotenv import load_dotenv
         for _candidate in (BASE_DIR.parent / '.env', BASE_DIR / '.env'):
@@ -98,6 +99,11 @@ if _rss_full_content not in {'0', '1'}:
 RSS_FULL_CONTENT_ENABLED = _rss_full_content == '1'
 PUBLIC_SIGNUP_ENABLED = _RUNTIME_CONFIG.public_signup_enabled
 PUBLIC_AI_ENABLED = _RUNTIME_CONFIG.public_ai_enabled
+# Independent opt-in; does not disable other AI features or erase index data.
+_semantic_search_enabled = _env('SEMANTIC_SEARCH_ENABLED', '0')
+if _semantic_search_enabled not in {'0', '1'}:
+    raise ImproperlyConfigured('SEMANTIC_SEARCH_ENABLED must be 0 or 1.')
+SEMANTIC_SEARCH_ENABLED = _semantic_search_enabled == '1'
 CHATGPT_PLAN_USAGE_ENABLED = _RUNTIME_CONFIG.chatgpt_plan_usage_enabled
 CHATGPT_AUTH_MODE = _RUNTIME_CONFIG.chatgpt_auth_mode
 EDGE_TTS_ENDPOINT = _RUNTIME_CONFIG.edge_tts_endpoint

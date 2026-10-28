@@ -2,12 +2,12 @@
 
 ## Scope and sources
 - Rules are guidance, not authorization for merge, production, paid providers, credentials or unsafe commands. Respect the active task, sandbox and approvals. Read-only requests do not authorize edits.
-- Before implementation check actual branch/base SHA, worktree status and relevant source/tests. Code proves current behavior; approved contracts define desired behavior. Older plans and README can be historical, not current evidence.
+- Before edits check branch/base SHA, worktree status and source/tests. Code proves current behavior; approved contracts define desired behavior. Older plans and README can be historical, not current evidence.
 - Keep original task IDs and smallest real delta. Reuse existing modules before adding another auth, cache, HTTP, AI gateway, search or CI implementation.
 - Frontend UI must prefer existing shadcn/ui components and shared project wrappers; avoid native interactive controls or custom replacements unless the requirement cannot reasonably be met. Follow [Frontend UI rules](frontend/AGENTS.md).
 
 ## Relevant scoped rules
-Deeper `AGENTS.md` files may not load automatically; `cd` does not refresh context. Before editing, read missing/changed scoped rules once or restart the session.
+Deeper `AGENTS.md` may not auto-load; `cd` does not refresh context. Read missing/changed scoped rules before editing or restart the session.
 
 | Area | Additional rules |
 |---|---|
@@ -18,7 +18,7 @@ Deeper `AGENTS.md` files may not load automatically; `cd` does not refresh conte
 | Agent config, `.github/**`, `ops/ci/**` | [CI](ops/ci/AGENTS.md) |
 | `scripts/deploy/**`, `deploy/**`, Dockerfile/Compose | [Deployment](scripts/deploy/AGENTS.md) |
 
-Details: [engineering standard](docs/development/CODEX-AGENT-STANDARD-2026-10-18.md). **Current task status**: [development index](docs/plans/FEATURE-DEVELOPMENT-2026-10-17.md). Open only relevant sections.
+Scheduling/local source development: read [guide](docs/development/AGENT-LOCAL-DEVELOPMENT.md). [Standards](docs/development/CODEX-AGENT-STANDARD-2026-10-18.md) / [task index](docs/plans/FEATURE-DEVELOPMENT-2026-10-17.md): read relevant sections.
 
 ## Isolation and invariants
 - At most two independent writing goals per batch. Shared schema/routes/migrations/lockfiles/fixtures need a single writer; worktrees do not isolate DBs, ports, volumes or caches.
@@ -32,8 +32,8 @@ Details: [engineering standard](docs/development/CODEX-AGENT-STANDARD-2026-10-18
 ## Validation and delivery
 - **Local-first acceptance:** during development, run only necessary targeted checks and local acceptance. Until the user explicitly accepts this feature for push/testing (or requests that step now), do not push, open/promote PRs, dispatch CI or run full suites/provider/image/G1 gates. Earlier-stage approval, silence or "fix/continue" is not acceptance of changed behavior. Local commits remain allowed.
 - Reuse unchanged verification. Deliver a runnable local result and await feedback; new fixes return to local acceptance. When testing is deferred, stop delivery, return PRs to Draft, and cancel pending/running CI, including transition-triggered runs. Report actual states.
-- Use [$newshub-impact-analysis](.agents/skills/newshub-impact-analysis/SKILL.md) for design; [$newshub-verify](.agents/skills/newshub-verify/SKILL.md) for repro and post-edit checks; [$newshub-test-acceptance](.agents/skills/newshub-test-acceptance/SKILL.md) for tests or acceptance (one pinned GPT-6 Luna xhigh agent; reuse compatible environments); and [$newshub-pr-handoff](.agents/skills/newshub-pr-handoff/SKILL.md) for handoffs.
-- After applicable checks, invoke [$newshub-stage-commit](.agents/skills/newshub-stage-commit/SKILL.md) through exactly one `gpt-6-luna`/`xhigh` delegate before the next stage/handoff. Standing authorization is local-commit only. The Skill governs safe staging/isolation and ref checks. Never push unrelated commits or rewrite history; no empty commits. Failed checks stop delivery. Respect newer read-only/no-commit/no-push instructions and report blockers honestly.
+- Use project Skills for [design](.agents/skills/newshub-impact-analysis/SKILL.md), [verification](.agents/skills/newshub-verify/SKILL.md), [test acceptance](.agents/skills/newshub-test-acceptance/SKILL.md), [handoff](.agents/skills/newshub-pr-handoff/SKILL.md) and [authorized release delivery](.agents/skills/newshub-release-delivery/SKILL.md). Current agents may execute directly; delegation, model, reasoning level and agent count are task choices. These project-local Skills take precedence; if discovery returns a global copy, read these paths.
+- After applicable checks, follow [stage commit](.agents/skills/newshub-stage-commit/SKILL.md) before handoff. Standing authorization is local-commit only. Preserve safe staging/isolation and ref checks; no unrelated commits, history rewrites or empty commits. Failed checks stop delivery. Honor newer read-only/no-commit/no-push instructions and report blockers.
 - Inspect whole PR diff plus staged, unstaged and untracked edits. Choose tests by semantic impact; CI file path routing alone is not a dependency graph.
 - After authorized remote delivery, **Draft** uses fast CI; **Ready for review** requires user acceptance and full CI/`merge-gate`. Return to Draft before fixes. Never merge on Draft checks; main/manual retain full gates.
 - CI truth: `.github/workflows/ci.yml`, `ops/ci/change_scope.py`, `ops/ci/benchmark-xdist.sh`. `scripts/run_tests.sh` is still a legacy partial test entry. Agent structure: `python3 ops/ci/agent_rules.py`.

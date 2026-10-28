@@ -14,7 +14,7 @@ from api.services.channel_catalog import sync_channel_catalog
 from api.tests.rss.reader_fixtures import public_rss_source
 
 
-@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True)
+@override_settings(PUBLIC_SITE_MODE='full', PUBLIC_AI_ENABLED=True, SEMANTIC_SEARCH_ENABLED=True)
 class ChannelsTests(TestCase):
     def setUp(self):
         self.enterContext(env_patch.dict(os.environ, {'RSS_ENGINE_INSTANCE_UUID': 'be22a55a-11c1-4ae4-9038-c919ec75aa42', 'RSS_ENGINE_ACCOUNT_ID': '3'}))

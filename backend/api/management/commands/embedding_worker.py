@@ -6,6 +6,7 @@ import time
 import uuid
 
 from django.core.management.base import BaseCommand, CommandError
+from api.services.semantic_search import semantic_search_enabled
 
 from api.services.search_index import (
     SearchIndexCancelled,
@@ -45,6 +46,14 @@ class Command(BaseCommand):
 
         signal.signal(signal.SIGTERM, stop_worker)
         signal.signal(signal.SIGINT, stop_worker)
+
+        if not semantic_search_enabled():
+            self.stdout.write('semantic_search_disabled: worker idle; no index state touched.')
+            # Keep supervised workers idle rather than creating a restart loop.
+            # Configuration is process-scoped; enabling requires a worker restart.
+            while not self.stopping and not options['once']:
+                time.sleep(2)
+            return
 
         try:
             with acquire_search_index_execution_lock():

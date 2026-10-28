@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from api.admin_api import IsActiveSuperuser, error_response
+from api.services.semantic_search import semantic_search_enabled
 from api.models import SearchIndexRun
 from api.search_index_serializers import (
     SearchIndexRunSerializer,
@@ -46,6 +47,8 @@ class SearchIndexDashboardView(APIView):
     permission_classes = [IsActiveSuperuser]
 
     def get(self, request):
+        if not semantic_search_enabled():
+            return error_response('semantic_search_disabled', '语义搜索当前不可用。', status.HTTP_403_FORBIDDEN)
         settings = get_search_index_settings()
         settings_data = SearchIndexSettingsSerializer(settings).data
         settings_data['worker_online'] = index_worker_is_online(settings)
@@ -77,6 +80,8 @@ class SearchIndexSettingsView(APIView):
     permission_classes = [IsActiveSuperuser]
 
     def patch(self, request):
+        if not semantic_search_enabled():
+            return error_response('semantic_search_disabled', '语义搜索当前不可用。', status.HTTP_403_FORBIDDEN)
         allowed = {'enabled', 'interval_seconds', 'batch_size'}
         if set(request.data) - allowed:
             return error_response('invalid_settings', '包含不允许修改的索引设置。')
@@ -100,6 +105,8 @@ class SearchIndexRunListCreateView(APIView):
         return Response(SearchIndexRunSerializer(runs, many=True).data)
 
     def post(self, request):
+        if not semantic_search_enabled():
+            return error_response('semantic_search_disabled', '语义搜索当前不可用。', status.HTTP_403_FORBIDDEN)
         if set(request.data) - {'mode'}:
             return error_response('invalid_run', '只允许设置 mode。')
         mode = request.data.get('mode', 'sync')

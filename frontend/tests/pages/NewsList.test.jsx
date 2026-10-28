@@ -7,7 +7,7 @@ import { AuthContext } from '@/context/AuthContext'
 import { usePreferencesStore } from '@/stores/preferences'
 import NewsList from '@/pages/NewsList'
 import NewsScopeBar from '@/components/NewsScopeBar'
-import { CapabilitiesTestProvider } from '../helpers/capabilities'
+import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilities'
 import { blockNews, fetchCategories, fetchNews, fetchNewsDetail, fetchSources, unblockNews } from '@/services/api'
 
 vi.mock('@/services/api', () => ({
@@ -82,13 +82,13 @@ function HistoryControls() {
   )
 }
 
-function renderList(url, { historyControls = false } = {}) {
+function renderList(url, { historyControls = false, capabilities = fullCapabilities() } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const user = { id: 12, username: 'reader' }
   const initialEntries = Array.isArray(url) ? url : [url]
   return render(
     <QueryClientProvider client={client}>
-      <CapabilitiesTestProvider client={client}>
+      <CapabilitiesTestProvider client={client} value={capabilities}>
         <AuthContext.Provider value={{ user, loading: false, login: vi.fn(), register: vi.fn(), logout: vi.fn(), refresh: vi.fn() }}>
           <MemoryRouter initialEntries={initialEntries} initialIndex={initialEntries.length - 1}>
             <NewsList />
@@ -150,6 +150,42 @@ beforeEach(() => {
   })
   blockNews.mockResolvedValue({ created: true })
   unblockNews.mockResolvedValue({ removed: true })
+})
+
+describe('NewsList semantic search capability in full mode', () => {
+  it.each(['disabled', 'unknown'].flatMap((capability) =>
+    ['semantic', 'hybrid', undefined].map((mode) => ({ capability, mode })),
+  ))('uses only keyword requests with $capability capability and URL mode $mode', async ({ capability, mode }) => {
+    const capabilities = fullCapabilities({ semantic_search: false })
+    if (capability === 'unknown') delete capabilities.features.semantic_search
+    else capabilities.features.semantic_search.reason = 'semantic_search_disabled'
+    renderList(`/?search=climate${mode ? `&mode=${mode}` : ''}`, { capabilities })
+
+    expect(await screen.findByRole('heading', { name: story.title })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '关键词' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('radio', { name: '语义' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: '混合' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', '/search?q=climate&mode=keyword')
+    if (mode) expect(screen.getByTestId('location-search')).toHaveTextContent('mode=keyword')
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'keyword update' } })
+    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'keyword update', mode: 'keyword' }), expect.any(AbortSignal),
+    ))
+    expect(fetchNews.mock.calls.every(([params]) => params.mode === 'keyword')).toBe(true)
+  })
+
+  it.each([['semantic', '语义'], ['hybrid', '混合']])('keeps %s selectable when enabled', async (mode, label) => {
+    renderList('/?search=climate&mode=keyword', { capabilities: fullCapabilities({ semantic_search: true }) })
+    expect(await screen.findByRole('heading', { name: story.title })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('radio', { name: label }))
+    await waitFor(() => expect(fetchNews).toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'climate', mode }), expect.any(AbortSignal),
+    ))
+    expect(screen.getByTestId('location-search')).toHaveTextContent(`mode=${mode}`)
+    expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', `/search?q=climate&mode=${mode}`)
+  })
 })
 
 describe('NewsList URL and server state', () => {

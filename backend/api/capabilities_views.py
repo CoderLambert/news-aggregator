@@ -1,6 +1,7 @@
 """Public, non-sensitive description of site-level feature switches."""
 
 from django.conf import settings
+from api.services.semantic_search import semantic_search_enabled
 from django.http import JsonResponse
 from django.views.decorators.http import require_safe
 
@@ -52,8 +53,8 @@ def _feature_snapshot() -> dict[str, dict[str, object]]:
     if not settings.PUBLIC_SIGNUP_ENABLED:
         features["signup"] = _feature(False, "signup_disabled")
 
+    features["semantic_search"] = _feature(semantic_search_enabled(), "semantic_search_disabled")
     if not settings.PUBLIC_AI_ENABLED:
-        features["semantic_search"] = _feature(False, "semantic_search_disabled")
         for name in AI_FEATURE_NAMES:
             features[name] = _feature(False, "ai_disabled")
 

@@ -90,7 +90,8 @@ def test_fetch_webpage_cancellation_before_stored_lookup_never_starts_http(monke
     assert calls == []
 
 
-def test_semantic_query_variations_stop_before_second_embedding_after_cancellation(monkeypatch):
+def test_semantic_query_variations_stop_before_second_embedding_after_cancellation(monkeypatch, settings):
+    settings.SEMANTIC_SEARCH_ENABLED = True
     state = {'cancelled': False}
     calls = []
 

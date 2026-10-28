@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from api.models import SearchIndexRun, SearchIndexSettings
 from api.services.embedding import MODEL_NAME
+from api.services.semantic_search import semantic_search_enabled
 
 
 ACTIVE_INDEX_STATUSES = ('queued', 'running', 'cancel_requested')
@@ -61,8 +62,14 @@ def index_version_is_current(settings=None):
     )
 
 
-@transaction.atomic
 def queue_search_index_run(*, trigger, mode='sync', requested_by=None, crawl_batch=None):
+    if not semantic_search_enabled():
+        return None, False
+    return _queue_enabled_index_run(trigger=trigger, mode=mode, requested_by=requested_by, crawl_batch=crawl_batch)
+
+
+@transaction.atomic
+def _queue_enabled_index_run(*, trigger, mode, requested_by, crawl_batch):
     if mode == 'sync' and not index_version_is_current():
         mode = 'rebuild'
     if crawl_batch is not None:
@@ -90,8 +97,14 @@ def queue_search_index_run(*, trigger, mode='sync', requested_by=None, crawl_bat
     return run, True
 
 
-@transaction.atomic
 def claim_next_index_run(instance_id):
+    if not semantic_search_enabled():
+        return None
+    return _claim_enabled_index_run(instance_id)
+
+
+@transaction.atomic
+def _claim_enabled_index_run(instance_id):
     run = (
         SearchIndexRun.objects.select_for_update()
         .filter(status='queued')
@@ -209,6 +222,8 @@ def recover_interrupted_index_runs(
 
 
 def schedule_due_index_run():
+    if not semantic_search_enabled():
+        return None
     settings = get_search_index_settings()
     if not settings.enabled:
         return None

@@ -10,6 +10,7 @@ from api.models import News, SearchIndexRun, SearchIndexSettings
 from api.services.embedding import MODEL_NAME
 from api.services.search_index_control import INDEX_SCHEMA_VERSION, get_search_index_settings
 from api.services.vector_store import VectorStoreService
+from api.services.semantic_search import require_semantic_search
 
 
 _WHITESPACE = re.compile(r'\s+')
@@ -56,6 +57,7 @@ def _metadata(news_id, source_hash, settings):
 
 
 def audit_search_index(*, include_changed=True):
+    require_semantic_search()
     news_count = News.objects.count()
     settings = get_search_index_settings()
     if (
@@ -258,6 +260,7 @@ def _reconcile_pass(
 
 
 def synchronize_search_index(run_id, *, heartbeat=None, cancel_requested=None):
+    require_semantic_search()
     run = SearchIndexRun.objects.get(pk=run_id)
     settings = get_search_index_settings()
     vector_store = VectorStoreService()

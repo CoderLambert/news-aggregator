@@ -1,5 +1,7 @@
 # NewsHub开发方案与任务文档
 
+**Agent 调度、本地源码开发与交付**：先读[本地开发与任务调度指南](AGENT-LOCAL-DEVELOPMENT.md)。本文其余部分是功能计划的存放与索引约定，不代替当前派发任务或根规则的验收/授权边界。
+
 本仓库后续使用 `superpowers:writing-plans` 或整理功能开发计划时，统一保存到 `docs/development/任务计划/<feature-key>/`，按功能组织。此路径为用户指定，覆盖技能默认的 `docs/superpowers/plans/` 保存位置；不修改全局技能包。
 
 进入[任务计划索引](任务计划/README.md)，当前功能为[RSS Discovery V1](任务计划/rss-discovery-v1/README.md)。已有工程标准等文档保持原位置，本次不整理无关历史材料。

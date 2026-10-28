@@ -5,7 +5,7 @@ Tests: multi-select category/source filters, time precision, search, pagination
 
 import uuid
 from unittest.mock import patch
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.utils import timezone
 from datetime import timedelta
 from api.models import Category, Source, News
@@ -166,6 +166,7 @@ class SearchTest(TestCase):
         titles = self.f._titles(r.json())
         self.assertIn(f'{self.f.prefix}_Python async programming', titles)
 
+    @override_settings(SEMANTIC_SEARCH_ENABLED=True)
     def test_semantic_search_no_vector_fallback(self):
         with (
             patch('api.services.embedding.EmbeddingService.is_loaded', return_value=True),
@@ -176,6 +177,7 @@ class SearchTest(TestCase):
         d = r.json()
         self.assertIsInstance(d['results'], list)
 
+    @override_settings(SEMANTIC_SEARCH_ENABLED=True)
     def test_hybrid_search_no_vector_fallback(self):
         with patch('api.services.vector_store.VectorStoreService.count', return_value=0):
             r = self.client.get('/api/news/?search=test&mode=hybrid&page_size=10')

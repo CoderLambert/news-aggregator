@@ -11,6 +11,9 @@ from api.services.vector_store import DEFAULT_COLLECTION, VectorStoreService
 
 @pytest.fixture
 def store(tmp_path, settings, monkeypatch):
+    settings.SEMANTIC_SEARCH_ENABLED = True
+    settings.PUBLIC_SITE_MODE = 'full'
+    settings.PUBLIC_AI_ENABLED = True
     settings.CHROMA_DATA_DIR = str(tmp_path / 'index')
     monkeypatch.setattr(VectorStoreService, '_instance', None)
     service = VectorStoreService()

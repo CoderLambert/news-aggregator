@@ -1,8 +1,10 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import AdminPage from '@/pages/admin/AdminPage'
 import { workspaceRequest } from '@/services/workspaceApi'
+import { fetchSearchIndexDashboard } from '@/services/searchIndexAdminApi'
+import { CapabilitiesTestProvider, fullCapabilities } from '../helpers/capabilities'
 
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { id: 17, isSuperuser: true } }) }))
 vi.mock('@/services/workspaceApi', () => ({
@@ -26,11 +28,15 @@ vi.mock('@/services/searchIndexAdminApi', () => ({
   cancelSearchIndexRun: vi.fn(), createSearchIndexRun: vi.fn(), updateSearchIndexSettings: vi.fn(),
 }))
 
-it('loads aggregate and RSS status independently while the retained index section is pending', async () => {
+beforeEach(() => vi.clearAllMocks())
+
+it.each(['enabled', 'disabled', 'unknown'] as const)('gates only the index section and navigation when semantic search is %s in full mode', async (capability) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><AdminPage /></QueryClientProvider>)
+  const capabilities = fullCapabilities({ semantic_search: capability === 'enabled' })
+  if (capability === 'unknown') Reflect.deleteProperty(capabilities.features, 'semantic_search')
+  else if (capability === 'disabled') capabilities.features.semantic_search.reason = 'semantic_search_disabled'
+  const { container } = render(<CapabilitiesTestProvider client={client} value={capabilities}><AdminPage /></CapabilitiesTestProvider>)
   expect(screen.getByRole('heading', { name: '系统运行管理' })).toBeInTheDocument()
-  expect(screen.getByLabelText('正在加载搜索索引状态')).toBeInTheDocument()
   expect(await screen.findByText(/RSS 连接状态 · 引擎可用/)).toBeInTheDocument()
   expect(await screen.findByText('所有已配置服务正常')).toBeInTheDocument()
   expect(screen.getByText('AI 网关')).toBeInTheDocument()
@@ -38,6 +44,23 @@ it('loads aggregate and RSS status independently while the retained index sectio
     '/admin/rss/health/',
     '/admin/runtime-health/',
   ])
+  if (capability === 'enabled') {
+    expect(screen.getByLabelText('正在加载搜索索引状态')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '搜索索引' })).toHaveAttribute('href', '/admin/rss#search-index')
+    expect(fetchSearchIndexDashboard).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal))
+  } else {
+    expect(fetchSearchIndexDashboard).not.toHaveBeenCalled()
+    expect(container.querySelector('#search-index')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '搜索索引' })).not.toBeInTheDocument()
+  }
+  for (const [name, href] of [
+    ['运行概览', '/admin/rss#overview'],
+    ['公开频道审核', '/admin/rss/recommendations'],
+    ['频道审核员', '/admin/rss/reviewers'],
+    ['频道核验', '/admin/rss/channels'],
+  ]) {
+    expect(screen.getByRole('link', { name })).toHaveAttribute('href', href)
+  }
   expect(screen.queryByText('全文监控')).not.toBeInTheDocument()
   expect(screen.queryByText('抓取历史')).not.toBeInTheDocument()
   client.clear()
