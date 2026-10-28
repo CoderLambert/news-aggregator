@@ -152,7 +152,7 @@ it('receives read-only SSE progress and rejects foreign task frames without a pa
   const listeners = new Map<string, (event: MessageEvent<string>) => void>()
   const close = vi.fn()
   vi.stubGlobal('EventSource', class { addEventListener(kind: string, handler: (event: MessageEvent<string>) => void) { listeners.set(kind, handler) } close = close })
-  const rendered = view(); await screen.findByRole('button', { name: '正在翻译…' })
+  const rendered = view(); await screen.findByRole('button', { name: '全文翻译中' })
   await act(async () => { listeners.get('message')?.(new MessageEvent('message', { data: JSON.stringify({ ...running, progress: '## 新段落' }) })); await new Promise(resolve => requestAnimationFrame(resolve)) })
   expect(rendered.changed).toHaveBeenCalledWith(expect.objectContaining({ progress: '## 新段落' }))
   act(() => listeners.get('message')?.(new MessageEvent('message', { data: JSON.stringify({ ...running, task_id: 'foreign' }) })))
@@ -162,6 +162,31 @@ it('receives read-only SSE progress and rejects foreign task frames without a pa
   expect(api.retryPrivateTranslation).not.toHaveBeenCalled()
 })
 
+it('shows that a mostly-Chinese article was kept without a model call', async () => {
+  if (completed.result === null) throw new Error('fixture')
+  const skippedResult: api.PrivateTranslationResult = {
+    ...completed.result, skipped_reason: 'mostly_chinese',
+  }
+  vi.mocked(api.latestPrivateTranslation).mockResolvedValue({
+    ...completed,
+    result: skippedResult,
+  })
+  view()
+  expect(await screen.findByText('原文主要是中文，已保留全文，未调用模型翻译。')).toBeInTheDocument()
+  expect(api.startPrivateTranslation).not.toHaveBeenCalled()
+})
+it('parses a mostly-Chinese skip and rejects an unknown skip reason', () => {
+  if (completed.result === null) throw new Error('fixture')
+  const parsed = api.parsePrivateTranslation({
+    ...completed,
+    result: { ...completed.result, skipped_reason: 'mostly_chinese' },
+  })
+  expect(parsed.result?.skipped_reason).toBe('mostly_chinese')
+  expect(() => api.parsePrivateTranslation({
+    ...completed,
+    result: { ...completed.result, skipped_reason: 'title_only' },
+  })).toThrow(/Invalid private translation result/)
+})
 it('resumes a queued task only on a click with its original identity and frozen model', async () => {
   const queued = { ...completed, status: 'queued', model_config_id: 'original-model', result: null, progress: '' } as api.PrivateTranslationTask
   vi.mocked(api.latestPrivateTranslation).mockResolvedValue(queued)

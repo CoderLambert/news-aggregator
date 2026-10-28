@@ -9,7 +9,7 @@ from django.db import IntegrityError, OperationalError, transaction, connection,
 from django.db.migrations.executor import MigrationExecutor
 from django.core.management import call_command
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Event
+from threading import Barrier, Event, Lock
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -1344,6 +1344,120 @@ class PrivateTranslationTests(TransactionTestCase):
         self.assertEqual(detail.data['result']['result_id'], result_id)
         self.assertEqual(latest.data['task']['result']['result_id'], result_id)
         self.assertEqual(build.call_count, len(chunks))
+
+    def test_t06_parallel_chunks_overlap_and_stitch_in_source_order(self):
+        self.news.full_content = 'A' * 5000 + '\n\n' + 'B' * 5000 + '\n\n' + 'C' * 5000
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        chunks = service._task_chunks(task.execution_snapshot)
+        self.assertEqual(len(chunks), 3)
+        bodies = ['第一段', '第二段', '第三段']
+        started = {'n': 0}
+        lock = Lock()
+        later_finished = Event()
+
+        class GatedStream:
+            def __init__(self, text, index):
+                self.text, self.index = text, index
+
+            def __iter__(self):
+                with lock:
+                    started['n'] += 1
+                if self.index == 0:
+                    if not later_finished.wait(5):
+                        raise TimeoutError('later chunk never overlapped the first stream')
+                    yield gateway_frame(self.text)
+                else:
+                    yield gateway_frame(self.text)
+                    if self.index == 1:
+                        later_finished.set()
+
+            def close(self):
+                return None
+
+        gateways = [FakeGateway(GatedStream(body, index)) for index, body in enumerate(bodies)]
+        with patch.object(service, 'build_gateway_client', side_effect=gateways) as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        prepared = [service._split_trailing_separator(chunk) for chunk in chunks]
+        expected = ''.join(body + separator for body, (_, separator) in zip(bodies, prepared))
+        self.assertEqual(task.status, 'succeeded', task.error_code)
+        self.assertEqual(build.call_count, 3)
+        self.assertGreaterEqual(started['n'], 2)
+        self.assertEqual(task.result['content'], expected)
+        self.assertEqual(task.progress, expected)
+        self.assertTrue(task.result['content'].index('第一段') < task.result['content'].index('第二段'))
+        self.assertTrue(gateways[0].sent[0]['messages'][1]['content'].startswith('A'))
+        self.assertTrue(gateways[1].sent[0]['messages'][1]['content'].startswith('B'))
+        self.assertTrue(gateways[2].sent[0]['messages'][1]['content'].startswith('C'))
+        self.assertEqual(ChatGPTArticleTranslation.objects.count(), 1)
+
+    def test_mostly_chinese_source_skips_the_model_and_keeps_the_full_text(self):
+        source = '这是一篇中文新闻稿，无需再次翻译。' * 3
+        self.assertTrue(service.mostly_chinese_source(source))
+        self.news.full_content = source
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        from api.ai_model_models import AICallAttempt
+        with patch.object(service, 'build_gateway_client') as build, \
+             self.assertLogs('api.services.ai_private_translation', level='INFO') as captured:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded', task.error_code)
+        self.assertFalse(task.provider_started)
+        self.assertEqual(task.result['content'], source)
+        self.assertEqual(task.result['skipped_reason'], 'mostly_chinese')
+        self.assertEqual(task.progress, source)
+        build.assert_not_called()
+        self.assertEqual(AICallAttempt.objects.count(), 0)
+        self.assertIn('reason=mostly_chinese', '\n'.join(captured.output))
+        detail = self.client.get(f'/api/me/ai/translations/{task.pk}/')
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data['result']['skipped_reason'], 'mostly_chinese')
+        self.assertEqual(detail.data['result']['content'], source)
+
+    def test_long_chinese_article_skips_every_chunk_call(self):
+        sentence = '这是一段足够长的中文新闻，用来确认长文也不会按块调用模型。'
+        source = (sentence + '\n\n') * 400
+        self.assertGreater(len(source), service.MAX_INPUT_CHARS)
+        self.assertLessEqual(len(source), service.T06_MAX_INPUT_CHARS)
+        self.assertTrue(service.mostly_chinese_source(source))
+        self.news.full_content = source
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        self.assertGreater(task.execution_snapshot['long_translation']['chunk_count'], 1)
+        with patch.object(service, 'build_gateway_client') as build:
+            service.run_translation(task.pk, task.generation)
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded', task.error_code)
+        self.assertEqual(task.result['content'], source)
+        self.assertEqual(task.result['skipped_reason'], 'mostly_chinese')
+        self.assertFalse(task.provider_started)
+        build.assert_not_called()
+
+    def test_english_with_a_chinese_name_and_japanese_still_call_the_model(self):
+        english = 'Alibaba 阿里巴巴 reported record cloud revenue this quarter. ' * 40
+        japanese = 'これは日本語のニュース記事です。東京で会議が開かれました。' * 4
+        code_heavy = (
+            '这是中文正文，应该直接保留全文而不调用模型翻译。\n\n'
+            '```py\nprint("english only code block with many latin letters")\n```\n'
+        )
+        self.assertFalse(service.mostly_chinese_source(english))
+        self.assertFalse(service.mostly_chinese_source(japanese))
+        self.assertTrue(service.mostly_chinese_source(code_heavy))
+        self.news.full_content = english
+        self.news.full_content_state = 'legacy'
+        self.news.save(update_fields=['full_content', 'full_content_state'])
+        task = self.queued()
+        gateway = self.execute(task, [gateway_frame('英文新闻的中文译文。')])
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'succeeded', task.error_code)
+        self.assertEqual(len(gateway.sent), 1)
+        self.assertNotIn('skipped_reason', task.result)
+        self.assertTrue(task.provider_started)
 
     def test_t06_queued_source_mutation_fails_closed_before_dispatch(self):
         task = self.queued()

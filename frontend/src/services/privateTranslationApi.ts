@@ -8,6 +8,7 @@ export interface PrivateTranslationResult {
   scope: 'private'
   provider: string
   model: string
+  skipped_reason?: 'mostly_chinese'
 }
 export interface PrivateTranslationTask {
   task_id: string
@@ -27,7 +28,8 @@ const statuses = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled
 function parseResult(value: unknown): PrivateTranslationResult {
   if (!isRecord(value) || value.scope !== 'private' || typeof value.result_id !== 'number' ||
       typeof value.task_id !== 'string' || typeof value.content !== 'string' || !value.content.trim() ||
-      typeof value.provider !== 'string' || typeof value.model !== 'string') {
+      typeof value.provider !== 'string' || typeof value.model !== 'string' ||
+      (value.skipped_reason !== undefined && value.skipped_reason !== 'mostly_chinese')) {
     throw new TypeError('Invalid private translation result')
   }
   return value as unknown as PrivateTranslationResult

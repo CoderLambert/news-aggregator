@@ -68,6 +68,56 @@ def test_chat_prompt_and_stream_scope_agree_and_never_fetch_article(make_news,cl
     assert news.full_content_fetch_status == 'pending'
 
 
+def test_summary_question_lowers_legacy_budget_without_shrinking_full_text(make_news, client):
+    news = make_news(full_content='READABLE_FULL_BODY', full_content_state='legacy')
+    client.force_login(User.objects.create_user(username='summary-budget'))
+    captured = {}
+
+    def stream(messages, **kwargs):
+        captured['max_tokens'] = kwargs['max_tokens']
+        captured['prompt'] = messages[0]['content']
+        captured['evidence'] = messages[1]['content']
+        yield '要点'
+
+    with patch('api.services.ai_execution.personal_clients_for_user', return_value=[(object(), 'model')]), \
+         patch('api.views.stream_chat', side_effect=stream):
+        response = client.post(
+            f'/api/news/{news.pk}/chat/',
+            {'question': '帮我用一句话总结这篇文章'},
+            content_type='application/json',
+        )
+        b''.join(response.streaming_content)
+    assert response.status_code == 200
+    assert captured['max_tokens'] == 512
+    assert 'READABLE_FULL_BODY' in captured['evidence']
+    assert '"evidence_policy": "full_article_body"' in captured['evidence']
+    assert '约 180 个汉字' in captured['prompt']
+    assert 'READABLE_FULL_BODY' not in captured['prompt']
+
+
+def test_detail_question_keeps_legacy_output_ceiling(make_news, client):
+    news = make_news(full_content='READABLE_FULL_BODY', full_content_state='legacy')
+    client.force_login(User.objects.create_user(username='detail-budget'))
+    captured = {}
+
+    def stream(messages, **kwargs):
+        captured['max_tokens'] = kwargs['max_tokens']
+        captured['evidence'] = messages[1]['content']
+        yield '展开'
+
+    with patch('api.services.ai_execution.personal_clients_for_user', return_value=[(object(), 'model')]), \
+         patch('api.views.stream_chat', side_effect=stream):
+        response = client.post(
+            f'/api/news/{news.pk}/chat/',
+            {'question': '请详细分析这篇文章'},
+            content_type='application/json',
+        )
+        b''.join(response.streaming_content)
+    assert response.status_code == 200
+    assert captured['max_tokens'] == 16000
+    assert 'READABLE_FULL_BODY' in captured['evidence']
+
+
 def test_suggestions_use_summary_scope_without_waiting_for_article_http(make_news,client):
     news=make_news()
     client.force_login(User.objects.create_user(username='suggestion-context'))

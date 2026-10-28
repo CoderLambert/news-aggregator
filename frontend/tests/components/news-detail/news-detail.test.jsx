@@ -124,7 +124,7 @@ describe('FullContentSection', () => {
 
   it('renders the spinner card while translating with no progress yet', () => {
     renderSection({ translating: true, translationProgress: '' })
-    expect(screen.getByText('正在翻译全文…')).toBeInTheDocument()
+    expect(screen.getByText('全文翻译中')).toBeInTheDocument()
     expect(screen.getByText(/取消会阻止后续请求与保存/)).toBeInTheDocument()
   })
 
@@ -144,7 +144,7 @@ describe('FullContentSection', () => {
 
   it('renders streaming progress when translating with partial content', () => {
     renderSection({ translating: true, translationProgress: '部分译文...' })
-    expect(screen.getByText('AI 正在翻译…')).toBeInTheDocument()
+    expect(screen.getByText('全文翻译中')).toBeInTheDocument()
   })
 
   it('shows ErrorBanner when translateError is non-empty', () => {

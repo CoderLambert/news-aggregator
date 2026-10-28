@@ -49,6 +49,7 @@ describe('ChatMessageList', () => {
       <ChatMessageList messages={messages} phase="thinking" onSuggestionClick={() => {}} />,
     )
     expect(container.querySelectorAll('.thinking-dot')).toHaveLength(3)
+    expect(screen.getByRole('status', { name: '小闻正在回答' })).toBeInTheDocument()
   })
 
   it('distinguishes interrupted, failed and unversioned answers', () => {

@@ -49,7 +49,7 @@ describe('ChatHeader', () => {
         onClose={() => {}}
       />,
     )
-    expect(screen.getByText('正在回答你～')).toBeInTheDocument()
+    expect(screen.getByText('小闻正在回答')).toBeInTheDocument()
 
     rerender(
       <ChatHeader
