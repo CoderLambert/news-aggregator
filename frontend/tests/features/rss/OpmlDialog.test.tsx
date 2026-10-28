@@ -57,6 +57,76 @@ describe('personal OPML workflow', () => {
     })))
   })
 
+  it('defaults to explicit two-level auto creation and includes existing ungrouped only after confirmation', async () => {
+    const key = 'opml-path:["技术","AI / 大模型"]'
+    const grouped = { ...batch, groups: [key], organize_existing: true,
+      group_labels: { [key]: '技术 / AI / 大模型' },
+      group_plan: { [key]: { root_name: '技术', name: 'AI / 大模型', action: 'create', group_id: null, create_root: true, reason: '' } },
+      items: [{ ...batch.items[0], groups: [key], outcome: 'already_subscribed', can_organize: true }],
+    }
+    request.mockResolvedValueOnce(grouped).mockResolvedValueOnce({ ...grouped, status: 'confirmed' })
+    setup()
+    fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'grouped.opml')] } })
+    fireEvent.click(screen.getByRole('button', { name: '预览文件' }))
+    expect(await screen.findByRole('combobox', { name: '技术 / AI / 大模型映射分组' })).toHaveValue('auto')
+    expect(screen.getByRole('checkbox', { name: '导入 One' })).toBeChecked()
+    expect(screen.getByText(/其中可整理已有未分组 1 项/)).toBeInTheDocument()
+    expect(request).toHaveBeenCalledTimes(1)
+    const body = request.mock.calls[0][1]?.body as FormData
+    expect(body.get('organize_existing')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 1 项' }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({
+      body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { [key]: 'auto' } },
+    })))
+  })
+
+  it('previews single-level OPML as a direct group with no invented root', async () => {
+    const label = '🌐 科技媒体与开源生态深度阅读'
+    request.mockResolvedValueOnce({ ...batch, groups: [label], group_plan: { [label]: {
+      root_name: null, name: label, action: 'create', group_id: null, create_root: false, reason: '',
+    } }, items: [{ ...batch.items[0], groups: [label] }] })
+    setup()
+    fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'flat.opml')] } })
+    fireEvent.click(screen.getByRole('button', { name: '预览文件' }))
+    expect(await screen.findByRole('combobox', { name: label + '映射分组' })).toHaveValue('auto')
+    expect(screen.getByRole('option', { name: '新建分组：' + label })).toBeInTheDocument()
+    expect(screen.queryByText('OPML 导入 / ' + label)).not.toBeInTheDocument()
+    expect(request).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '确认导入 1 项' }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/me/rss-imports/confirm/', expect.objectContaining({
+      body: { preview_token: 'signed-token', selected_ids: ['one'], group_map: { [label]: 'auto' } },
+    })))
+  })
+
+  it('previews organization without a file and retains unknown subscriptions unselected', async () => {
+    const grouped = { ...batch, organization_only: true, organize_existing: true, groups: [],
+      items: [{ ...batch.items[0], groups: [], outcome: 'already_subscribed', can_organize: false }],
+    }
+    request.mockResolvedValueOnce(grouped)
+    setup()
+    fireEvent.click(screen.getByRole('button', { name: '仅预览整理已有未分组' }))
+    expect(await screen.findByRole('checkbox', { name: '导入 One' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '确认导入 0 项' })).toBeDisabled()
+    const body = request.mock.calls[0][1]?.body as FormData
+    expect(body.get('file')).toBeNull()
+    expect(body.get('organization_only')).toBe('true')
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains cross-root conflicts and does not auto select a conflicting target', async () => {
+    request.mockResolvedValueOnce({ ...batch, group_matches: { Tech: 7 }, group_plan: { Tech: {
+      root_name: 'Imported', name: 'Tech', action: 'conflict', group_id: null, create_root: true,
+      reason: '已有同名子分组位于其他栏目，不会移动，请手动映射',
+    } } })
+    setup()
+    fireEvent.change(screen.getByLabelText('OPML 文件'), { target: { files: [new File(['<opml/>'], 'conflict.opml')] } })
+    fireEvent.click(screen.getByRole('button', { name: '预览文件' }))
+    expect(await screen.findByRole('combobox', { name: 'Tech映射分组' })).toHaveValue('')
+    expect(screen.getByText(/已有同名子分组位于其他栏目/)).toBeInTheDocument()
+    expect(screen.getByText(/502项公共目录不是全部个人订阅/)).toBeInTheDocument()
+    expect(request).toHaveBeenCalledTimes(1)
+  })
+
   it('requires an explicit owned root when confirming a new child', async () => {
     request.mockResolvedValueOnce(batch).mockResolvedValueOnce({ ...batch, status: 'confirmed' })
     setup()

@@ -34,7 +34,7 @@ def lock_user(user):
 def record_group_structure_change(user, *, root_ids=(), removed_group_ids=(), exclude_proposal_id=None):
     """Fence stale grouping work after one already-validated structural mutation."""
     now = timezone.now()
-    root_ids = set(root_ids)
+    root_ids = {identity for identity in root_ids if identity is not None}
     if root_ids:
         ChannelGroupRoot.objects.filter(user=user, pk__in=root_ids).update(
             version=F('version') + 1, updated_at=now,
@@ -90,7 +90,7 @@ def hierarchy_state(user):
     if len(groups) > 200:
         raise GroupLimitExceeded()
     root_ids = {root.pk for root in roots}
-    if any(group.root_id not in root_ids for group in groups):
+    if any(group.root_id is not None and group.root_id not in root_ids for group in groups):
         raise GroupingConflict('分组层级不完整，请刷新后重试。')
     children = [{
         'group_id': group.pk,
@@ -505,7 +505,7 @@ def undo_proposal(user, proposal_id):
                 pk=change['child_id'], user=user,
                 root_id=change['after_root_id'], version=change['after_version'],
             ).first()
-            original_root_exists = ChannelGroupRoot.objects.filter(
+            original_root_exists = change['before_root_id'] is None or ChannelGroupRoot.objects.filter(
                 pk=change['before_root_id'], user=user,
             ).exists()
             if group is None or not original_root_exists:
@@ -656,8 +656,8 @@ def private_groups(user):
             remaining -= 1
         children.append({
             'group_id': group.pk, 'root_id': group.root_id,
-            'root_name': group.root.name, 'name': group.name,
-            'path': f'{group.root.name} / {group.name}', 'examples': examples,
+            'root_name': group.root.name if group.root_id else None, 'name': group.name,
+            'path': f'{group.root.name} / {group.name}' if group.root_id else group.name, 'examples': examples,
         })
     return {
         'roots': [{'root_id': root.pk, 'name': root.name} for root in roots],

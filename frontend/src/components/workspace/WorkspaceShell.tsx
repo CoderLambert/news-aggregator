@@ -3,7 +3,7 @@ import type { ReactNode, MouseEvent } from 'react'
 import { Link, useLocation, useNavigationType } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { readingPosition, rememberReadingPosition } from '@/services/readingPosition'
-import { BookOpen, ChevronDown, ChevronRight, FolderOpen, Heart, House, Menu, Moon, Plus, Rss, Search, Settings, Sparkles, Sun } from 'lucide-react'
+import { BookOpen, ChevronDown, ChevronRight, Folder, FolderOpen, Heart, House, Menu, Moon, Plus, Rss, Search, Settings, Sparkles, Sun } from 'lucide-react'
 import { useChannelConfig } from '@/services/channelQueries'
 import { useCapability } from '@/context/CapabilitiesContext'
 import WorkspaceModal from './WorkspaceModal'
@@ -126,6 +126,7 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
     if (to === '/') return location.pathname === '/' && !['subscribed', 'group', 'ungrouped'].includes(new URLSearchParams(location.search).get('scope') ?? '')
     return location.pathname === to || (to === '/channels' && /^\/channels\/\d+$/.test(location.pathname))
   }
+  const nonEmptyGroups = (config.groups.data ?? []).filter(group => group.source_ids.length > 0)
   const navigation = <>
     <Link className="workspace-brand" to="/" onClick={() => setDrawer(false)}><span aria-hidden="true">N</span>NewsHub</Link>
     <nav aria-label="阅读工作区导航" className="workspace-nav">{items.map(({ label, to, icon: Icon }) =>
@@ -134,11 +135,16 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
       <p className="workspace-eyebrow">快捷分组 <span>频道数</span></p>
       <Link to={readingLink('all')} onClick={() => setDrawer(false)}><FolderOpen size={15} aria-hidden="true" />全部资讯</Link>
       <Link to={readingLink('ungrouped')} onClick={() => setDrawer(false)}><FolderOpen size={15} aria-hidden="true" />未加入分组</Link>
+      {nonEmptyGroups.filter(group => group.root_id === null).map(group => <Link key={group.id} to={readingLink('group', group.id)} onClick={() => setDrawer(false)}
+        aria-current={location.pathname === '/' && new URLSearchParams(location.search).get('group_id') === String(group.id) ? 'page' : undefined}>
+        <Folder size={15} className="shrink-0" aria-hidden="true" /><span className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere]" title={group.name}>{group.name}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
+      </Link>)}
       {(config.roots.data ?? []).map(root => {
-        const children = (config.groups.data ?? []).filter(group => group.root_id === root.id)
+        const children = nonEmptyGroups.filter(group => group.root_id === root.id)
+        if (children.length === 0) return null
         const collapsed = collapsedRoots.has(root.id)
         return <div key={root.id} className="min-w-0">
-          <Button type="button" variant="ghost" className="w-full justify-start" aria-expanded={!collapsed}
+          <Button type="button" variant="ghost" className="h-auto w-full min-w-0 justify-start whitespace-normal text-left" aria-expanded={!collapsed}
             aria-label={(collapsed ? '展开 ' : '折叠 ') + root.name}
             onClick={() => setCollapsedRoots(current => {
               const next = new Set(current)
@@ -146,12 +152,13 @@ export default function WorkspaceShell({ children }: { children: ReactNode }) {
               else next.add(root.id)
               return next
             })}>
-            {collapsed ? <ChevronRight size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}<span className="workspace-truncate">{root.name}</span>
+            {collapsed ? <ChevronRight size={15} className="shrink-0" aria-hidden="true" /> : <ChevronDown size={15} className="shrink-0" aria-hidden="true" />}
+            {collapsed ? <Folder size={15} className="shrink-0" aria-hidden="true" /> : <FolderOpen size={15} className="shrink-0" aria-hidden="true" />}<span className="min-w-0 break-words [overflow-wrap:anywhere]">{root.name}</span>
           </Button>
-          {!collapsed && children.map(group => <Link className="ml-3" key={group.id} to={readingLink('group', group.id)} onClick={() => setDrawer(false)}
+          {!collapsed && <div className="ml-6 border-l pl-2">{children.map(group => <Link key={group.id} to={readingLink('group', group.id)} onClick={() => setDrawer(false)}
             aria-current={location.pathname === '/' && new URLSearchParams(location.search).get('group_id') === String(group.id) ? 'page' : undefined}>
-            <span className="workspace-topic-dot" aria-hidden="true" /><span className="workspace-truncate">{channelGroupPath(group, config.roots.data ?? [])}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
-          </Link>)}
+            <Folder size={15} className="shrink-0" aria-hidden="true" /><span className="min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere]" title={channelGroupPath(group, config.roots.data ?? [])}>{group.name}</span><small title={group.source_ids.length + ' 个频道'}>{group.source_ids.length}</small>
+          </Link>)}</div>}
         </div>
       })}
       {config.error && <button type="button" className="workspace-link" onClick={() => void config.retry()}>重试加载分组</button>}

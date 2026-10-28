@@ -59,6 +59,34 @@ def test_malicious_or_oversized_file_rejected(people, raw):
     assert not RssImportBatch.objects.exists()
 
 
+@pytest.mark.parametrize('fallback', [False, True], ids=['installed-parser', 'stdlib-parser'])
+@pytest.mark.parametrize('encoding,declaration,group_name,title', [
+    ('utf-8', False, '🌐 技术 / AI & 大模型', '中文频道 🌐'),
+    ('utf-8', True, '技术媒体', '中文频道'),
+    ('utf-8-sig', False, '技术媒体', '中文频道'),
+    ('utf-16', True, '技术媒体', '中文频道'),
+    ('iso-8859-1', True, 'Café / déjà vu', 'Économie & médias'),
+], ids=['utf8-default', 'utf8-declaration', 'utf8-bom', 'utf16', 'latin1'])
+def test_opml_preserves_xml_encoding_across_parser_backends(monkeypatch, fallback, encoding, declaration, group_name, title):
+    import listparser
+
+    if fallback:
+        monkeypatch.setattr(listparser, 'lxml', None)
+    root = ET.Element('opml', version='2.0')
+    body = ET.SubElement(root, 'body')
+    folder = ET.SubElement(body, 'outline', text=group_name)
+    ET.SubElement(folder, 'outline', type='rss', text=title, xmlUrl='https://example.com/feed')
+    raw = ET.tostring(root, encoding=encoding, xml_declaration=declaration)
+    with patch('requests.sessions.Session.request', side_effect=AssertionError('network')), \
+            patch('listparser.parse', wraps=listparser.parse) as parse:
+        rows = parse_opml(raw)
+    assert rows == [{
+        'feed_url': 'https://example.com/feed', 'title': title,
+        'groups': [group_name], 'status': 'preview', 'duplicate_count': 0,
+    }]
+    assert isinstance(parse.call_args.args[0], bytes)
+
+
 def test_credential_url_redacted(people):
     result = preview(people[0], b'<opml><body><outline type="rss" text="secret" xmlUrl="https://example.com/feed?token=hidden"/></body></opml>')
     assert result.status_code == 201

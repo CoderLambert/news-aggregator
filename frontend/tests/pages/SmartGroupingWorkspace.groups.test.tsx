@@ -79,6 +79,52 @@ it('keeps hierarchy planning review-only and applies only selected exact rows', 
   })))
 })
 
+async function openHierarchyTask(task: Proposal) {
+  handler = (path, options) => path === '/me/smart-channels/proposals/?target=hierarchy&page=1' ? page([task])
+    : path.endsWith(`/${task.id}/`) ? task : defaults(path, options)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); clients.push(client)
+  render(<QueryClientProvider client={client}><MemoryRouter><SmartGroupingWorkspace /></MemoryRouter></QueryClientProvider>)
+  fireEvent.click(await screen.findByRole('button', { name: '查看任务' }))
+  return screen.findByRole('region', { name: '层级建议' })
+}
+
+it.each([
+  ['metadata_changed', '频道资料已更新，请重新生成。'],
+  ['authorization_changed', '模型凭据或授权已变化，请检查设置后重新生成。'],
+  ['unexpected-provider-secret', '任务未完成，请刷新状态后检查设置；不会自动重发模型请求。'],
+])('explains hierarchy failure %s without retrying inference or exposing raw errors', async (error_code, explanation) => {
+  const task: Proposal = { ...proposal, id: 'failed-hierarchy', target: 'hierarchy', engine: 'ai', status: 'failed', error_code, result: [] }
+  const region = await openHierarchyTask(task)
+  expect(within(region).getByRole('alert')).toHaveTextContent(explanation)
+  expect(screen.getAllByText(explanation)).toHaveLength(2)
+  expect(within(region).getByRole('alert')).toHaveTextContent('未修改你的分组')
+  expect(screen.queryByText('unexpected-provider-secret')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '生成层级建议' })).toBeDisabled()
+  expect(writes()).toHaveLength(0)
+})
+
+it.each([
+  ['queued', '任务已保存，等待后台开始处理；尚未生成建议。'],
+  ['running', 'AI 正在分析层级；完成后需要你确认才会修改分组。'],
+] as const)('accurately describes a %s hierarchy task', async (status, message) => {
+  const region = await openHierarchyTask({ ...proposal, id: 'pending-hierarchy', target: 'hierarchy', engine: 'ai', status, result: [] })
+  expect(within(region).getByRole('status')).toHaveTextContent(message)
+  expect(writes()).toHaveLength(0)
+})
+
+it('refreshes a saved hierarchy task to ready without a new model request or automatic apply', async () => {
+  const task: Proposal = { ...proposal, id: 'refresh-hierarchy', target: 'hierarchy', engine: 'ai', status: 'queued', result: [] }
+  const region = await openHierarchyTask(task)
+  task.status = 'ready'
+  task.result = [{ root_id: 3, root_name: null, group_ids: [8], reason: '现有技术方向' }]
+  const refresh = within(region).getByRole('button', { name: '刷新任务状态' })
+  await waitFor(() => expect(refresh).toBeEnabled())
+  fireEvent.click(refresh)
+  expect(await within(region).findByRole('button', { name: '确认应用层级移动' })).toBeInTheDocument()
+  expect(within(region).queryByText(/等待后台开始处理/)).not.toBeInTheDocument()
+  expect(writes()).toHaveLength(0)
+})
+
 function startRules() {
   fireEvent.click(screen.getByRole('button', { name: '免费规则匹配' }))
   fireEvent.click(screen.getByRole('button', { name: '匹配到已有分组' }))

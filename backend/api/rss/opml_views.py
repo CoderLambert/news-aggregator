@@ -12,7 +12,18 @@ class OpmlPreviewView(RssAPIView):
         file = request.FILES.get('file')
         if file and file.size > MAX_BYTES:
             raise TooLarge
-        return Response(preview(request.user, file.read(MAX_BYTES + 1) if file else b'', file.name if file else ''), status=201)
+        organize = request.data.get('organize_existing', False)
+        only = request.data.get('organization_only', False)
+        if organize not in (True, False, 'true', 'false') or only not in (True, False, 'true', 'false'):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError('整理选项须为布尔值。')
+        organize, only = organize in (True, 'true'), only in (True, 'true')
+        if only and (file or not organize):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError('仅整理已有订阅时请勿上传文件，并开启整理选项。')
+        return Response(preview(request.user, file.read(MAX_BYTES + 1) if file else b'',
+            file.name if file else '已有未分组订阅', organize_existing=organize,
+            organization_only=only), status=201)
 
 
 class OpmlConfirmView(RssAPIView):

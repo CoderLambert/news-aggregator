@@ -181,6 +181,9 @@ class ChannelSubscriptionsView(PersonalChannelsView):
                 subscription.groups.set(groups)
         else:
             raise ValidationError({'action': '无效操作。'})
+        if action in {'add_to_group', 'move_to_group', 'remove_from_group', 'set_groups'}:
+            # Fence even add/remove ABA edits against a pending import preview.
+            record_group_structure_change(request.user)
         return self.get(request)
 
 
@@ -253,16 +256,16 @@ class ChannelGroupsView(PersonalChannelsView):
     @transaction.atomic
     def post(self, request):
         self.lock(request.user)
-        if set(request.data) != {'name', 'root_id'} or type(request.data.get('root_id')) is not int:
-            raise ValidationError('创建子分组须提交名称与根分类。')
+        if set(request.data) != {'name', 'root_id'} or (request.data['root_id'] is not None and type(request.data['root_id']) is not int):
+            raise ValidationError('创建分组须提交名称与根分类ID；直接分组使用空值。')
         if ChannelGroup.objects.filter(user=request.user).count() >= 200:
             raise ValidationError('每个账号最多创建 200 个子分组。')
-        root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=request.data['root_id'])
+        root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=request.data['root_id']) if request.data['root_id'] is not None else None
         group = ChannelGroup.objects.create(
             user=request.user, root=root,
             name=group_name(request.data, request.user),
         )
-        record_group_structure_change(request.user, root_ids=[root.pk])
+        record_group_structure_change(request.user, root_ids=[root.pk] if root else [])
         return Response(group_data(group), status=201)
 
 
@@ -285,14 +288,15 @@ class ChannelGroupDetailView(PersonalChannelsView):
                 raise ChannelGroupConflict()
             next_root = group.root
             if 'root_id' in request.data:
-                if type(request.data['root_id']) is not int:
-                    raise ValidationError('请选择有效的根分类。')
-                next_root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=request.data['root_id'])
+                if request.data['root_id'] is not None and type(request.data['root_id']) is not int:
+                    raise ValidationError('请选择有效的根分类或直接分组。')
+                next_root = get_object_or_404(ChannelGroupRoot, user=request.user, pk=request.data['root_id']) if request.data['root_id'] is not None else None
             next_name = group.name
             if 'name' in request.data:
                 next_name = group_name(request.data, request.user, exclude=pk)
-            changed_roots = {group.root_id, next_root.pk} if next_root.pk != group.root_id else set()
-            if next_name != group.name or next_root.pk != group.root_id:
+            next_root_id = next_root.pk if next_root else None
+            changed_roots = {group.root_id, next_root_id} if next_root_id != group.root_id else set()
+            if next_name != group.name or next_root_id != group.root_id:
                 group.name, group.root, group.version = next_name, next_root, group.version + 1
                 group.save(update_fields=['name', 'root', 'version', 'updated_at'])
                 record_group_structure_change(request.user, root_ids=changed_roots)
@@ -322,6 +326,7 @@ class ChannelGroupDetailView(PersonalChannelsView):
                 group.subscriptions.set(subscriptions)
             else:
                 getattr(group.subscriptions, operation)(*subscriptions)
+        record_group_structure_change(request.user)
         return Response(group_data(group))
 
     @transaction.atomic

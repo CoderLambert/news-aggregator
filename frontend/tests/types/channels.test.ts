@@ -11,6 +11,14 @@ describe('channel hierarchy parsers', () => {
     expect(validateHierarchy(roots, groups)).toBe(true)
     expect(channelGroupPath(groups[0], roots)).toBe('技术 / 前端')
   })
+  it('represents direct groups with null parents without inventing or hiding names', () => {
+    const direct = parseGroups([{ ...child, root_id: null, name: '🌐 科技媒体与开源生态深度阅读' }])[0]
+    expect(validateHierarchy([], [direct])).toBe(true)
+    expect(channelGroupPath(direct, [])).toBe(direct.name)
+    expect(channelGroupPath({ ...direct, name: 'OPML 导入 / 手工原名' }, [])).toBe('OPML 导入 / 手工原名')
+    expect(channelGroupPath(child, [root])).toBe('技术 / 前端')
+    expect(validateHierarchy([root], [child, { ...direct, id: 8 }])).toBe(true)
+  })
   it('rejects malformed or exactly duplicate roots while preserving case-distinct backend names', () => {
     for (const value of [
       [{ ...root, id: true }],
@@ -34,7 +42,7 @@ describe('channel hierarchy parsers', () => {
 
   it('rejects malformed or duplicate children', () => {
     for (const value of [
-      [{ ...child, root_id: null }],
+      [{ ...child, root_id: undefined }],
       [{ ...child, version: 0 }],
       [{ ...child, source_ids: [true] }],
       [child, { ...child, id: 8, name: '前端' }],

@@ -882,11 +882,11 @@ export function updateChannelGroupRoot(id: number, payload: { name: string; expe
 export function deleteChannelGroupRoot(id: number, expectedVersion: number): Promise<unknown> {
   return api.delete<unknown>(`/me/channel-group-roots/${id}/`, { params: { expected_version: expectedVersion } }).then(({ data }) => data)
 }
-export function createChannelGroup(name: string, rootId: number): Promise<unknown> {
+export function createChannelGroup(name: string, rootId: number | null): Promise<unknown> {
   return api.post<unknown>('/me/channel-groups/', { name, root_id: rootId }).then(({ data }) => data)
 }
 export function updateChannelGroup(id: number, payload: {
-  name?: string; root_id?: number; expected_version?: number
+  name?: string; root_id?: number | null; expected_version?: number
   source_ids?: number[]; add_source_ids?: number[]; remove_source_ids?: number[]
 }): Promise<unknown> {
   return api.patch<unknown>(`/me/channel-groups/${id}/`, payload).then(({ data }) => data)
