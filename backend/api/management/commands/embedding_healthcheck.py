@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand, CommandError
+from api.services.semantic_search import semantic_search_enabled
 
 from api.services.search_index_control import get_search_index_settings, index_worker_is_online
 
@@ -7,6 +8,9 @@ class Command(BaseCommand):
     help = '检查语义索引 Worker 心跳'
 
     def handle(self, *args, **options):
+        if not semantic_search_enabled():
+            self.stdout.write('disabled: semantic search is not expected to run')
+            return
         settings = get_search_index_settings()
         if not index_worker_is_online(settings):
             raise CommandError('Embedding Worker 心跳已过期。')

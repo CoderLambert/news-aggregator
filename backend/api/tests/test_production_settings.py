@@ -39,6 +39,7 @@ def _import_settings(tmp_path, overrides=None, prelude=""):
         "'environment': s.DJANGO_ENV, 'debug': s.DEBUG, 'allowed_hosts': s.ALLOWED_HOSTS,\n" \
         "'csrf_origins': s.CSRF_TRUSTED_ORIGINS, 'site_mode': s.PUBLIC_SITE_MODE,\n" \
         "'signup': s.PUBLIC_SIGNUP_ENABLED, 'ai': s.PUBLIC_AI_ENABLED,\n" \
+        "'semantic': s.SEMANTIC_SEARCH_ENABLED,\n" \
         "'plan': s.CHATGPT_PLAN_USAGE_ENABLED, 'auth_mode': s.CHATGPT_AUTH_MODE,\n" \
         "'edge_tts_endpoint': s.EDGE_TTS_ENDPOINT,\n" \
         "'trusted_proxy': s.WAITRESS_TRUSTED_PROXY,\n" \
@@ -75,6 +76,23 @@ def _run_invalid(tmp_path, name, value):
         capture_output=True,
         check=False,
     )
+
+
+@pytest.mark.parametrize('environment', ['development', 'production'])
+@pytest.mark.parametrize('value,expected', [(None, False), ('0', False), ('1', True)])
+def test_semantic_search_is_opt_in_in_every_profile(tmp_path, environment, value, expected):
+    overrides = {'DJANGO_ENV': environment, 'NEWSHUB_SKIP_DOTENV': '1'}
+    if value is not None:
+        overrides['SEMANTIC_SEARCH_ENABLED'] = value
+    result = _import_settings(tmp_path, overrides)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['semantic'] is expected
+
+
+def test_semantic_search_rejects_invalid_configuration(tmp_path):
+    result = _run_invalid(tmp_path, 'SEMANTIC_SEARCH_ENABLED', 'yes')
+    assert result.returncode != 0
+    assert 'SEMANTIC_SEARCH_ENABLED must be 0 or 1' in result.stderr
 
 
 def test_production_defaults_fail_closed_and_set_browser_security(tmp_path):

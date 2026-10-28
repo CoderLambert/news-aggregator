@@ -1,6 +1,8 @@
 import logging
 import threading
 
+from .semantic_search import require_semantic_search, semantic_search_enabled
+
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
@@ -21,6 +23,7 @@ class EmbeddingService:
 
     @property
     def model(self):
+        require_semantic_search()
         if self._model is not None:
             return self._model
         with self._model_lock:
@@ -34,11 +37,13 @@ class EmbeddingService:
             return self._model
 
     def encode(self, text):
+        require_semantic_search()
         if not text or not text.strip():
             return [0.0] * 384
         return self.model.encode(text, normalize_embeddings=True).tolist()
 
     def encode_batch(self, texts, batch_size=32):
+        require_semantic_search()
         if not texts:
             return []
         return self.model.encode(
@@ -48,6 +53,8 @@ class EmbeddingService:
     @classmethod
     def preload(cls):
         """Load the model in a background thread during Django startup."""
+        if not semantic_search_enabled():
+            return
         def _load():
             try:
                 instance = cls()

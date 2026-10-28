@@ -146,6 +146,35 @@ bash scripts/news-server dev import-key
 其他 instance/state 变量与前端一致。配置变更用 `restart`；模型/长任务和依赖服务接入属于另行授权的验收范围。
 `health` 只证明本实例进程身份和 listener，不代表全部API、worker、RSS或provider健康。
 
+## 语义搜索：默认关闭，前后端共用服务端开关
+
+普通运行 profile 的 `SEMANTIC_SEARCH_ENABLED` 缺省为 `0`；只接受 `0`/`1`，非法值拒绝启动。
+它是独立的语义功能总开关，不会关闭其他 AI 能力，也不改变文章/订阅的 owner 权限。
+
+```text
+SEMANTIC_SEARCH_ENABLED=0   # 默认：暂停语义搜索和语义索引执行
+# 恢复需显式设为1，同时保留既有 PUBLIC_SITE_MODE=full、PUBLIC_AI_ENABLED=1 前提。
+```
+
+服务端 `/api/capabilities/` 的 `features.semantic_search` 是前端唯一依据，不设平行 `VITE_*` 开关。
+关闭或能力未知时，搜索页只提供关键词，旧 semantic/hybrid URL 转为 keyword，不发语义请求；
+管理页隐藏搜索索引导航和面板，不继续轮询索引 dashboard。普通关键词/已授权正文关键词检索保持可用。
+直接调用新闻 semantic/hybrid API 返回403 `error_code: semantic_search_disabled`；
+管理员索引 dashboard、设置修改、任务创建也被拒绝，沿用管理接口的 `code: semantic_search_disabled` 格式。
+历史索引任务查询/取消仍保留既有管理员权限，不借关闭开关删除数据。
+研究工具的混合搜索/主题分析保留关键词分支，显式语义搜索返回功能关闭说明，不影响其他独立研究工具。
+
+关闭时不预加载/下载 embedding 模型、不计算向量、不审计向量库、不新增或领取语义索引任务；
+`embedding_worker` 保持空闲（`--once` 直接退出），不恢复/清理旧候选，避免受监管服务反复重启。
+`sync_embeddings`/`backfill_embeddings` 明确报功能关闭；健康检查报告 disabled，而非宣称索引任务已成功。
+已有向量、模型缓存、队列和持久化索引设置保留；重新开启后沿用原恢复、租约和同步/重建流程。
+`SEARCH_INDEX_ENABLED`/后台索引 `enabled` 仅是既有周期调度设置，不能覆盖总开关，亦不会被本次切换重置。
+
+环境配置是**进程级**：修改后须在另外获得运行操作授权时让 web 与 embedding worker 加载同一配置，
+并刷新浏览器能力信息。仅改源码或环境文件不会停止仍使用旧配置的进程；本功能不自动重启现有服务。
+重新开启可能触发模型加载和索引工作，需先确认对应资源/网络授权，不因设置为1就获得 provider 或部署权限。
+独立 `news-server dev` profile 强制该开关为0，保持原有离线保护；不能靠给其父进程传1绕过。
+
 ## 前端命令和状态隔离
 
 兼容命令：`start`、`stop`、`restart`、`status`、`health`、`build`、`log`。

@@ -12,6 +12,7 @@ import { cancelSearchIndexRun, createSearchIndexRun, updateSearchIndexSettings }
 import { searchIndexAdminKeys, searchIndexDashboardOptions } from '@/services/searchIndexAdminQueries'
 import type { SearchIndexRun, SearchIndexSettings } from '@/types/searchIndexAdmin'
 import { useAuth } from '@/context/AuthContext'
+import { useCapability } from '@/context/CapabilitiesContext'
 
 const dateFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -135,6 +136,7 @@ function SearchIndexSection() {
 
 export default function AdminPage() {
   const { user } = useAuth()
+  const semanticSearchEnabled = useCapability('semantic_search').enabled
   return <AdminLayout>
     <section id="overview" className="scroll-mt-20 space-y-4">
       <h1 className="text-2xl font-semibold">系统运行管理</h1>
@@ -142,6 +144,6 @@ export default function AdminPage() {
       {user && <RuntimeHealthCard key={`runtime-${user.id}`} viewer={user.id} />}
       {user && <ConnectionStatus key={`rss-${user.id}`} viewer={user.id} admin={user.isSuperuser} />}
     </section>
-    <SearchIndexSection />
+    {semanticSearchEnabled && <SearchIndexSection />}
   </AdminLayout>
 }

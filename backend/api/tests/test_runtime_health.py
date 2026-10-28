@@ -53,7 +53,8 @@ def test_runtime_health_endpoint_is_active_superuser_only_and_not_cached(django_
 
 
 @pytest.mark.django_db
-def test_missing_search_index_settings_is_reported_without_creating_a_row(monkeypatch):
+def test_missing_search_index_settings_is_reported_without_creating_a_row(monkeypatch, settings):
+    settings.SEMANTIC_SEARCH_ENABLED = True
     monkeypatch.setenv('SEARCH_INDEX_ENABLED', '1')
     SearchIndexSettings.objects.all().delete()
 
@@ -68,7 +69,8 @@ def test_missing_search_index_settings_is_reported_without_creating_a_row(monkey
     assert not SearchIndexSettings.objects.exists()
 
 @pytest.mark.django_db
-def test_persisted_search_index_enablement_overrides_the_initial_environment_default(monkeypatch):
+def test_persisted_search_index_enablement_overrides_the_initial_environment_default(monkeypatch, settings):
+    settings.SEMANTIC_SEARCH_ENABLED = True
     monkeypatch.setenv('SEARCH_INDEX_ENABLED', '0')
     SearchIndexSettings.objects.create(pk=1, enabled=True, worker_heartbeat_at=None)
 

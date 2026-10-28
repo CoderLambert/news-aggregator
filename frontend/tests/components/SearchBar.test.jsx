@@ -94,13 +94,13 @@ describe('SearchBar', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('calls onModeChange when mode button is clicked', () => {
+  it.each([['semantic', '语义'], ['hybrid', '混合']])('calls onModeChange for enabled %s mode', (mode, label) => {
     const onModeChange = vi.fn()
     renderWithLang(
-      <SearchBar value="" onChange={() => {}} mode="hybrid" onModeChange={onModeChange} allowSemantic />
+      <SearchBar value="" onChange={() => {}} mode="keyword" onModeChange={onModeChange} allowSemantic />
     )
-    fireEvent.click(screen.getByText('语义'))
-    expect(onModeChange).toHaveBeenCalledWith('semantic')
+    fireEvent.click(screen.getByRole('radio', { name: label }))
+    expect(onModeChange).toHaveBeenCalledWith(mode)
   })
 
   it('shows English mode labels when lang is en', () => {
@@ -121,16 +121,23 @@ describe('SearchBar', () => {
     expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', '/search?q=agent%20tools&mode=keyword')
   })
 
-  it('fails closed to keyword options and advanced-search mode by default', () => {
+  it.each([false, undefined].flatMap((allowSemantic) =>
+    ['semantic', 'hybrid'].map((mode) => ({ allowSemantic, mode })),
+  ))('fails closed for allowSemantic=$allowSemantic and mode=$mode', ({ allowSemantic, mode }) => {
+    const onChange = vi.fn()
     const onModeChange = vi.fn()
     renderWithLang(
-      <SearchBar value="agent tools" onChange={() => {}} mode="hybrid" onModeChange={onModeChange} />,
+      <SearchBar value="agent tools" onChange={onChange} mode={mode} onModeChange={onModeChange} allowSemantic={allowSemantic} />,
     )
 
-    expect(screen.getByText('关键词')).toBeInTheDocument()
-    expect(screen.queryByText('语义')).not.toBeInTheDocument()
-    expect(screen.queryByText('混合')).not.toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '关键词' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('radio', { name: '语义' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: '混合' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', '/search?q=agent%20tools&mode=keyword')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'keyword update' } })
+    act(() => { vi.advanceTimersByTime(350) })
+    expect(onChange).toHaveBeenCalledWith('keyword update')
+    expect(screen.getByRole('link', { name: '高级搜索' })).toHaveAttribute('href', '/search?q=keyword%20update&mode=keyword')
     expect(onModeChange).not.toHaveBeenCalled()
   })
 })

@@ -633,7 +633,15 @@ def _tool_search_news(query: str, mode: str = 'hybrid', limit: int = 10,
     Supports time filtering, ordering, content filtering, and category filtering.
     """
     from api.models import News
-    from api.services.vector_store import VectorStoreService
+    from api.services.semantic_search import semantic_search_enabled
+
+    if not semantic_search_enabled():
+        if mode == 'semantic':
+            return {'articles': [], 'total': 0, 'query': query, 'mode': mode,
+                    'error_code': 'semantic_search_disabled', 'error': '语义搜索当前不可用。'}
+        mode = 'keyword'
+    if mode != 'keyword':
+        from api.services.vector_store import VectorStoreService
 
     guard = execution_guard or (lambda: None)
     limit = min(limit, 30)
@@ -1089,7 +1097,7 @@ def _tool_fetch_webpage(url: str, execution_guard=None, user=None) -> dict:
 def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=None, user=None) -> dict:
     """Analyze a topic across multiple articles with timeline generation."""
     from api.models import News
-    from api.services.vector_store import VectorStoreService
+    from api.services.semantic_search import semantic_search_enabled
 
     depth_limits = {'quick': 5, 'standard': 15, 'deep': 30}
     limit = depth_limits.get(depth, 15)
@@ -1101,14 +1109,16 @@ def _tool_analyze_topic(query: str, depth: str = 'standard', execution_guard=Non
     if len(query) > 4:
         queries.append(query[:len(query) // 2])
 
-    vs = VectorStoreService()
-    if vs.count() > 0:
-        for q in queries:
-            if execution_guard is not None:
-                execution_guard()
-            results = vs.search(q, n=limit)
-            for nid, _ in results:
-                all_ids.add(nid)
+    if semantic_search_enabled():
+        from api.services.vector_store import VectorStoreService
+        vs = VectorStoreService()
+        if vs.count() > 0:
+            for q in queries:
+                if execution_guard is not None:
+                    execution_guard()
+                results = vs.search(q, n=limit)
+                for nid, _ in results:
+                    all_ids.add(nid)
 
     # Also try keyword match
     from api.rss.access import authorized_news

@@ -238,7 +238,8 @@ def test_list_full_content_filter_uses_readable_state_instead_of_last_attempt_st
 
 @pytest.mark.parametrize('mode', ['keyword', 'semantic', 'hybrid'])
 @pytest.mark.parametrize('order_by', ['relevance', 'time'])
-def test_research_search_full_content_filter_applies_after_all_search_modes(availability_corpus, mode, order_by, monkeypatch):
+def test_research_search_full_content_filter_applies_after_all_search_modes(availability_corpus, mode, order_by, monkeypatch, settings):
+    settings.SEMANTIC_SEARCH_ENABLED = True
     from api.services import vector_store
     results = [(item.pk, .1) for item in availability_corpus]
     vector = SimpleNamespace(count=lambda: len(results), search=lambda *_args, **_kwargs: results)

@@ -214,7 +214,8 @@ def test_serialized_cross_feed_member_hides_private_primary_source_and_body(worl
     assert results(client.get('/api/favorites/'))[0]['news']['source_name'] == public.name
 
 
-def test_semantic_candidate_reauthorization_and_summary_keyword(world, monkeypatch):
+def test_semantic_candidate_reauthorization_and_summary_keyword(world, monkeypatch, settings):
+    settings.SEMANTIC_SEARCH_ENABLED = True
     import sys
     from types import SimpleNamespace
     a, b, make = world

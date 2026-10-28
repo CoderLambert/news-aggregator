@@ -7,6 +7,7 @@ import chromadb
 from chromadb.errors import NotFoundError
 
 from .embedding import EmbeddingService
+from .semantic_search import require_semantic_search
 
 try:
     import fcntl
@@ -41,6 +42,7 @@ class VectorStoreService:
     @contextmanager
     def _data_lock(self, *, exclusive=False):
         """Coordinate local Chroma readers and writers across processes."""
+        require_semantic_search()
         with self._operation_lock:
             lock_path = self.chroma_dir / '.index.lock'
             handle = lock_path.open('a+')
@@ -58,6 +60,7 @@ class VectorStoreService:
 
     @property
     def client(self):
+        require_semantic_search()
         if self._client is None:
             self._client = chromadb.PersistentClient(path=str(self.chroma_dir))
         return self._client
@@ -76,6 +79,7 @@ class VectorStoreService:
             return DEFAULT_COLLECTION
 
     def get_collection(self, collection_name=None, *, create=True):
+        require_semantic_search()
         name = collection_name or self.active_collection_name()
         cached = self._collections.get(name)
         if cached is not None:
@@ -116,6 +120,7 @@ class VectorStoreService:
             self._collections.pop(collection_name, None)
 
     def add_news(self, news_id, text, *, metadata=None, collection_name=None):
+        require_semantic_search()
         embedding = EmbeddingService().encode(text)
         record = {'news_id': int(news_id), **(metadata or {})}
         with self._data_lock(exclusive=True):
@@ -134,6 +139,7 @@ class VectorStoreService:
         collection_name=None,
         batch_size=32,
     ):
+        require_semantic_search()
         embedding_svc = EmbeddingService()
         embeddings = embedding_svc.encode_batch(texts, batch_size=batch_size)
         records = metadatas or [{'news_id': int(nid)} for nid in news_ids]
@@ -145,6 +151,7 @@ class VectorStoreService:
             )
 
     def search(self, query, n=20, *, collection_name=None):
+        require_semantic_search()
         if not query or not query.strip():
             return []
         embedding = EmbeddingService().encode(query)

@@ -93,7 +93,7 @@ def environment(directory, api_port, ui_port):
         'DJANGO_SECRET_KEY': instance['secret'], 'DJANGO_ALLOWED_HOSTS': '127.0.0.1',
         'DJANGO_CSRF_TRUSTED_ORIGINS': f'http://127.0.0.1:{ui_port},http://127.0.0.1:{api_port}',
         'NEWS_CRAWL_ONLY': '1', 'PUBLIC_SITE_MODE': 'full', 'PUBLIC_SIGNUP_ENABLED': '1',
-        'PUBLIC_AI_ENABLED': '0', 'AI_BYOK_ENABLED': '0', 'CHATGPT_PLAN_USAGE_ENABLED': '0',
+        'SEMANTIC_SEARCH_ENABLED': '0', 'PUBLIC_AI_ENABLED': '0', 'AI_BYOK_ENABLED': '0', 'CHATGPT_PLAN_USAGE_ENABLED': '0',
         'CHATGPT_AUTH_MODE': 'disabled', 'CHATGPT_DEPLOYMENT_INSTANCE_ID': instance['id'],
         'FULL_CONTENT_WORKER_ENABLED': '0', 'FULL_CONTENT_AUTO_ENQUEUE_ENABLED': '0',
         'RSS_FULL_CONTENT_ENABLED': '0',

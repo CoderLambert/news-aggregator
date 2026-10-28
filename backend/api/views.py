@@ -271,6 +271,10 @@ class NewsListView(generics.ListAPIView):
             raise FullTextSearchUnavailable() from exc
 
     def list(self, request, *args, **kwargs):
+        from .services.semantic_search import semantic_search_enabled
+        from .public_policy import policy_error
+        if request.query_params.get('mode') not in (None, 'keyword') and not semantic_search_enabled():
+            return policy_error('semantic_search_disabled')
         self._validate_full_body_search(request)
         representation = request.query_params.get('representation', 'summary')
         if representation != 'summary':
@@ -320,6 +324,8 @@ class NewsListView(generics.ListAPIView):
         )
 
     def _semantic_search(self, request, query):
+        from .services.semantic_search import require_semantic_search
+        require_semantic_search()
         from .services.vector_store import VectorStoreService
         from .services.embedding import EmbeddingService
         from .services.search_index_control import index_version_is_current
@@ -375,6 +381,8 @@ class NewsListView(generics.ListAPIView):
         })
 
     def _hybrid_search(self, request, query):
+        from .services.semantic_search import require_semantic_search
+        require_semantic_search()
         from .services.vector_store import VectorStoreService
         from .services.search_index_control import index_version_is_current
 

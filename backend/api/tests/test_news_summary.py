@@ -2,6 +2,13 @@ from api.tests.rss.reader_fixtures import public_legacy_article
 import gzip
 from unittest.mock import patch
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def enable_semantic_paths(settings):
+    # These existing regressions exercise enabled semantics, not the new default.
+    settings.SEMANTIC_SEARCH_ENABLED = True
+
 from django.utils import timezone
 from rest_framework.test import APIClient
 from api.models import Category, Source, News

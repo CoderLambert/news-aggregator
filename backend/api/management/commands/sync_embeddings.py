@@ -4,6 +4,7 @@ import time
 import uuid
 
 from django.core.management.base import BaseCommand, CommandError
+from api.services.semantic_search import semantic_search_enabled
 
 from api.services.search_index import cleanup_recovered_index_runs, synchronize_search_index
 from api.services.search_index_control import (
@@ -27,6 +28,8 @@ class Command(BaseCommand):
         parser.add_argument('--timeout', type=int, default=1800, help='等待超时秒数')
 
     def handle(self, *args, **options):
+        if not semantic_search_enabled():
+            raise CommandError('semantic_search_disabled')
         mode = 'rebuild' if options['rebuild'] else 'sync'
         instance_id = f'cli:{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}'
         try:

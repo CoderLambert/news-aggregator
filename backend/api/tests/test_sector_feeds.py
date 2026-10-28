@@ -91,7 +91,8 @@ def test_catalog_regions_candidate_and_medical_summary_only(reading_data):
 @patch('api.services.embedding.EmbeddingService.is_loaded', return_value=True)
 @patch('api.services.search_index_control.index_version_is_current', return_value=True)
 @patch('api.services.vector_store.VectorStoreService')
-def test_regions_share_all_search_modes_and_group_intersection(vector, version, embedding, reading_data):
+def test_regions_share_all_search_modes_and_group_intersection(vector, version, embedding, reading_data, settings):
+    settings.SEMANTIC_SEARCH_ENABLED = True
     domestic, medical, stories = reading_data
     vector.return_value.count.return_value = 2
     vector.return_value.search.return_value = [(n.id, .9) for n in stories]

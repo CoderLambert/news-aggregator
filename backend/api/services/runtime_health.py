@@ -19,6 +19,7 @@ from django.db import connection
 from django.utils import timezone
 
 from api.models import SearchIndexSettings
+from api.services.semantic_search import semantic_search_enabled
 
 
 CHECK_NAMES = (
@@ -106,6 +107,8 @@ def _channel_worker_check() -> dict[str, object]:
 
 
 def _search_index_check() -> dict[str, object]:
+    if not semantic_search_enabled():
+        return _check(enabled=False, ready=False)
     configured = os.environ.get('SEARCH_INDEX_ENABLED')
     environment_enabled = configured is None or configured.strip().lower() in {'1', 'true', 'yes', 'on'}
     try:
