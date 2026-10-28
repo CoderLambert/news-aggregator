@@ -10,8 +10,8 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 
-from api.services.source_policy import (POLICIES, all_policies, policy_for_url,
-    policy_for_name, policy_from_config, retired_policy_for_url)
+from api.services.source_policy import (POLICIES, all_policies, config_for_source, iter_source_configs,
+    policy_for_url, policy_for_name, policy_from_config, retired_policy_for_url)
 
 BODY_POLICIES = frozenset({'standard', 'public_feed', 'public_rss', 'official_html', 'regulatory_data'})
 SUMMARY_POLICIES = frozenset({'summary_only', 'rss_summary_only'})
@@ -114,8 +114,7 @@ def _policies_for_url(url):
             policies.append(policy)
     # DB contracts with a built-in source key are omitted from all_policies by
     # the legacy registry. They still restrict direct/token/catalog admission.
-    from api.models import SourceConfig
-    for config in SourceConfig.objects.prefetch_related('endpoints'):
+    for config in iter_source_configs():
         matched = False
         config_policy = policy_from_config(config)
         for endpoint in config.endpoints.all():
@@ -192,7 +191,6 @@ def assert_binding_policy(binding, *, desired_mode=None, enabled=True):
     Disabling an existing physical feed must always remain possible. A disabled
     mutation cannot start collection, regardless of a now-retired source policy.
     """
-    from api.models import SourceConfig
     from api.rss.operations import OperationError
     if not enabled:
         return None
@@ -212,7 +210,7 @@ def assert_binding_policy(binding, *, desired_mode=None, enabled=True):
         named = policy_for_name(link.source.name)
         if named:
             policies.append(named)
-        config = SourceConfig.objects.prefetch_related('endpoints').filter(source_id=link.source_id).first()
+        config = config_for_source(link.source_id)
         if config:
             if not config.approval_is_current or config.status not in {'approved', 'enabled'}:
                 raise OperationError('source_collection_not_permitted')

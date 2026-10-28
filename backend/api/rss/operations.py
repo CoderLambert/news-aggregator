@@ -356,7 +356,18 @@ def acknowledge_refetch(operation_id, request_hash, *, sync_status='accepted', r
         return True
 
 
-def unresolved_control_operations(binding_id):
+def _unresolved_control_operations():
     from django.db.models import Q
-    return FeedOperation.objects.filter(binding_id=binding_id, shared_operation__isnull=True, kind__in=['register', 'set_enabled', 'update_feed_policy'],
+    return FeedOperation.objects.filter(shared_operation__isnull=True, kind__in=['register', 'set_enabled', 'update_feed_policy'],
         resolved_at__isnull=True).filter(Q(state__in=['unknown', 'manual_blocked']) | Q(safe_result__outcome_unknown=True)).exclude(state='succeeded')
+
+
+def unresolved_control_operations(binding_id):
+    return _unresolved_control_operations().filter(binding_id=binding_id)
+
+
+def unresolved_control_binding_ids(binding_ids):
+    """Binding ids with unresolved control work, in one read for a catalog page."""
+    if not binding_ids:
+        return set()
+    return set(_unresolved_control_operations().filter(binding_id__in=list(binding_ids)).values_list('binding_id', flat=True))

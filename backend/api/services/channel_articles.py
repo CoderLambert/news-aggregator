@@ -4,9 +4,28 @@ from api.services.source_policy import POLICIES, policy_for_name
 
 
 def channel_filter(queryset, source_ids):
-    from api.models import Source
-    from api.rss.access import news_in_sources
-    return news_in_sources(queryset, Source.objects.filter(pk__in=source_ids))
+    """Membership of these sources, starting from the source side.
+
+    Equivalent to ``news_in_sources`` against this source set: primary channel,
+    legacy source key, linked engine entry, or explicit public entry. A union
+    keeps group and source filters from correlating that test against every
+    article in the table.
+    """
+    from django.db.models import F
+    from api.models import EngineEntryMap, News, NewsSourceItem, Source
+    from api.rss.access import ALL_ENTRIES, _legacy_keys
+    from api.rss.public_membership import public_entries_for_sources
+    sources = Source.objects.filter(pk__in=source_ids)
+    regular = sources.exclude(publication__requires_public_membership=True)
+    primary = News.objects.filter(source_id__in=regular.values('pk')).annotate(_id=F('pk')).values('_id')
+    legacy = NewsSourceItem.objects.filter(source_key__in=_legacy_keys(regular)).annotate(_id=F('news_id')).values('_id')
+    engine = EngineEntryMap.objects.filter(
+        disposition='linked', news_id__isnull=False,
+        binding__source_links__source_id__in=regular.values('pk'),
+        binding__source_links__association_policy=ALL_ENTRIES,
+    ).annotate(_id=F('news_id')).values('_id')
+    public = public_entries_for_sources(sources).annotate(_id=F('entry__news_id')).values('_id')
+    return queryset.filter(pk__in=primary.union(legacy, engine, public))
 
 
 def region_filter(queryset, region, *, actor=None):

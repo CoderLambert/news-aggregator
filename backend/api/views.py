@@ -1064,6 +1064,17 @@ class SourceListView(PolicyNoStoreMixin, generics.ListAPIView):
             qs = qs.filter(region=region)
         return qs
 
+    def list(self, request, *args, **kwargs):
+        from api.services.channel_catalog import prime_subscription_status
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        sources = list(page if page is not None else queryset)
+        prime_subscription_status(sources)
+        serializer = self.get_serializer(sources, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
 
 
 class NewsSuggestedQuestionsView(ArticleAccessMixin, generics.GenericAPIView):
