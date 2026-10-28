@@ -448,6 +448,10 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
     requestRef.current = request
     const isCurrent = () => requestRef.current === request && ownerRef.current === ownerKey
     updatePhase('thinking')
+    // Accepted sends clear the submitted draft immediately so the next question
+    // can be typed while the answer streams. Blocked sends return before this.
+    // A draft that is not this message, including one typed after clearing, stays.
+    if (inputRef.current.trim() === trimmed) setInput('')
 
     return (async () => {
       let accumulated = ''
@@ -520,6 +524,7 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
             status: terminalStatus === 'failed' ? 'failed' : 'interrupted' }
           const uncertainTurn = snapshotActiveRequest(request)
           setPendingTurn(uncertainTurn)
+          if (!inputRef.current) setInput(trimmed)
           updatePhase('error')
           await reconcileInterruptedTurn(uncertainTurn)
           return false
@@ -531,7 +536,6 @@ export function useChat(newsId: string | number | null | undefined, enabled: boo
           messages: [...(current?.messages ?? []), userMessage, completedAssistant],
         }))
         setPendingTurn((current) => current?.ownerKey === ownerKey && current.id === turnId ? null : current)
-        if (inputRef.current === trimmed) setInput('')
         updatePhase('success')
         successTimerRef.current = setTimeout(() => {
           if (ownerRef.current === ownerKey) updatePhase('idle')
