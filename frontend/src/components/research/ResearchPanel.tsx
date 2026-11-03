@@ -125,6 +125,7 @@ function ResearchPanelView({
     sessions,
     activeSessionId,
     sessionResearchModel,
+    canRestartEmptySession,
     messages,
     phase,
     searchResults,
@@ -141,21 +142,22 @@ function ResearchPanelView({
     handleRetry,
   } = useResearch(user?.id ?? null, { authorizedCreateOnly })
 
-  const researchSource = activeSessionId
+  const useSessionModel = Boolean(activeSessionId) && !canRestartEmptySession
+  const researchSource = useSessionModel
     ? sessionResearchModel?.source ?? null : preferredSource
   const researchModelConfigId = researchSource === 'byok'
-    ? activeSessionId
+    ? useSessionModel
       ? sessionResearchModel?.model_config_id ?? null
       : preferredModelConfigId
     : null
-  const researchModelId = activeSessionId
+  const researchModelId = useSessionModel
     ? sessionResearchModel?.model_id ?? null : preferredModelId
   const hasResearchModel = Boolean(
     researchSource && researchModelId
     && (researchSource === 'chatgpt_subscription' || researchModelConfigId)
   )
-  const researchModelUnavailable = !activeSessionId && hasPersonalSelection && !hasResearchModel
-  const researchModelLabel = activeSessionId
+  const researchModelUnavailable = !useSessionModel && hasPersonalSelection && !hasResearchModel
+  const researchModelLabel = useSessionModel
     ? researchModelId
     : preferredSource === 'chatgpt_subscription'
       ? `ChatGPT 订阅 · ${taskPreferences.data?.subscription.display_name ?? researchModelId ?? ''}`
@@ -379,7 +381,12 @@ function ResearchPanelView({
             </div>
           ) : (
             <>
-              {authorizedCreateOnly && activeSessionId && (
+              {canRestartEmptySession && (
+                <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
+                  此会话尚未生成回答。确认当前模型后，发送问题将新建研究，原记录会保留。
+                </div>
+              )}
+              {authorizedCreateOnly && useSessionModel && (
                 <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
                   续问使用会话原模型来源，不能切换账号或供应商。每次发送前请重新确认对应额度或费用；旧会话缺少安全续接记录时，请新建研究。
                 </div>
@@ -389,7 +396,7 @@ function ResearchPanelView({
                   所选模型尚未完成研究所需的文本与工具能力验证，或连接已失效。请到 AI 设置检查；不会自动改用其他模型。
                 </div>
               )}
-              {authorizedCreateOnly && !activeSessionId && !hasResearchModel && (
+              {authorizedCreateOnly && !useSessionModel && !hasResearchModel && (
                 <div role="status" className="rounded-xl border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
                   请先到 AI 设置中配置并验证支持工具调用的个人模型或 ChatGPT 订阅模型，再返回开始研究。
                 </div>
