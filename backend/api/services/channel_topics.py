@@ -136,6 +136,8 @@ def profile_data(source, stored=None):
             'needs_review' if needs_review else 'trusted'),
         'subscription_status': status, 'subscription_reason': reason, 'can_subscribe': status == 'active',
         'rss_status': rss_status(source), 'feed_url': profile_feed_url(source, policy),
+        'publication': publication.publication if publication else None,
+        'collection_owner': publication.owner if publication else None,
         'policy_key': policy.key if policy else '', 'reading_policy': publication.reading_policy if publication else 'summary_only',
         'updated_at': stored.updated_at.isoformat() if stored else None}
 

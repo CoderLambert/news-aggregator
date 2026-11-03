@@ -12,6 +12,8 @@ import WorkspaceModal from '@/components/workspace/WorkspaceModal'
 import AddChannelDialog from '@/components/workspace/AddChannelDialog'
 import OpmlDialog from '@/features/rss/OpmlDialog'
 import ConnectionStatus from '@/features/rss/ConnectionStatus'
+import RecommendChannelsDialog from '@/features/rss/RecommendChannelsDialog'
+import { canRecommendChannel } from '@/features/rss/recommendationEligibility'
 import { Availability, ChannelMark, TopicTags } from '@/components/workspace/ChannelIdentity'
 import { channelGroupPath } from '@/types/channels'
 
@@ -38,6 +40,7 @@ function Directory() {
   const [cancelIds, setCancelIds] = useState<number[] | null>(null)
   const [bulkGroup, setBulkGroup] = useState('')
   const [notice, setNotice] = useState('')
+  const [recommending, setRecommending] = useState<ChannelProfile[] | null>(null)
   const sources = catalog.data?.sources ?? []
   const topics = catalog.data?.topics ?? []
   const subscriptions = new Map((config.subscriptions.data ?? []).map(subscription => [subscription.source_id, subscription]))
@@ -55,6 +58,7 @@ function Directory() {
     && (tab === 'pending' ? source.subscription_status !== 'active' : tab === 'subscribed' || source.subscription_status === 'active')
     && (tab === 'all' || tab === 'pending' || (config.ready && !config.error && (tab === 'subscribed' ? subscriptions.has(source.id) : !subscriptions.has(source.id)))))
   const selectedVisible = filtered.filter(source => selected.includes(source.id))
+  const recommendable = selectedVisible.filter(source => subscriptions.has(source.id) && canRecommendChannel(source))
   const writable = config.enabled && config.ready && !config.error && !mutation.isPending
   const editedSource = sources.find(source => source.id === editing)
   const editedSubscription = editing === null ? undefined : subscriptions.get(editing)
@@ -80,6 +84,7 @@ function Directory() {
         {config.accounts && <button type="button" className="workspace-button" onClick={() => user ? setAdding(true) : setLogin(true)}><Plus size={16} aria-hidden="true" />添加频道</button>}</div>
     </header>
     {config.enabled && user && <ConnectionStatus viewer={user.id} admin={user.isSuperuser} />}
+    {config.enabled && user && <p className="workspace-soft-panel">把你发现的优质公开 RSS 推荐给大家，审核通过后会加入公共频道。<Link to="/channels/additions?tab=recommendations">查看我的推荐与审核状态</Link></p>}
     <div className="workspace-tabs" role="group" aria-label="频道范围">{[
       { key: 'all', label: '全部频道', count: sources.filter(source => source.subscription_status === 'active').length },
       { key: 'pending', label: '待验证候选', count: sources.filter(source => source.subscription_status !== 'active').length },
@@ -101,6 +106,8 @@ function Directory() {
     {mutation.isError && <p role="alert" className="workspace-error">保存失败，请重试；原有订阅和分组不会被清空。</p>}
     {notice && <p role="status" className="workspace-notice">{notice}<button type="button" onClick={() => setNotice('')} aria-label="关闭操作提示">×</button></p>}
     {selectedVisible.length > 0 && config.enabled && <div className="workspace-bulk-bar" role="region" aria-label="批量操作"><strong>已选择 {selectedVisible.length} 个频道</strong>
+      <Button variant="outline" disabled={!writable || !recommendable.length || recommendable.length > 10} onClick={() => setRecommending(recommendable)}>推荐所选个人频道（{recommendable.length}/10）</Button>
+      {recommendable.length > 10 && <span role="status">每次最多推荐 10 个，请减少选择。</span>}
       <button type="button" className="workspace-button secondary" disabled={!writable || !selectedVisible.some(source => source.subscription_status === 'active' && !subscriptions.has(source.id))}
         onClick={() => run(() => changeChannelSubscriptions({ action: 'subscribe', source_ids: selectedVisible.filter(source => source.subscription_status === 'active' && !subscriptions.has(source.id)).map(source => source.id) }), '批量订阅完成')}>批量订阅</button>
       <button type="button" className="workspace-button secondary" disabled={!writable || !selectedVisible.some(source => subscriptions.has(source.id))} onClick={() => setCancelIds(selectedVisible.filter(source => subscriptions.has(source.id)).map(source => source.id))}>取消订阅</button>
@@ -120,12 +127,14 @@ function Directory() {
           <span className="workspace-channel-locale">{source.region === 'domestic' ? '国内' : '国际'} · {source.language === 'zh' ? '中文' : source.language === 'en' ? '英文' : source.language}</span>
           <div className="workspace-channel-actions">{config.accounts && <button type="button" className={'workspace-button ' + (subscribed ? 'subscribed' : 'secondary')} disabled={mutation.isPending || (!!user && !writable) || (!subscribed && source.subscription_status !== 'active')}
             onClick={() => subscribed ? setEditing(source.id) : subscribe(source)}>{subscribed ? '✓ 已订阅' : '+ 订阅'}</button>}
+            {subscribed && config.enabled && canRecommendChannel(source) && <Button variant="outline" disabled={!writable} onClick={() => setRecommending([source])}>推荐到公共频道</Button>}
             <Link className="workspace-link" to={'/channels/' + source.id}>详情</Link><Availability source={source} /></div>
         </article>
       })}
       {!catalog.isPending && !catalog.isError && !filtered.length && <div className="workspace-empty"><h2>没有匹配的频道</h2><p>调整筛选条件，或从全部频道中选择新的来源。</p><button type="button" className="workspace-button secondary" onClick={() => setParams({})}>查看全部频道</button></div>}
     </div>
     {login && <AuthModal onClose={() => setLogin(false)} />}
+    {recommending && user && <RecommendChannelsDialog viewer={user.id} sources={recommending} onClose={() => setRecommending(null)} />}
     {importing && user && <OpmlDialog viewer={user.id} roots={roots} groups={groups} onClose={() => setImporting(false)} />}
     {adding && <AddChannelDialog topics={topics} onClose={() => setAdding(false)} onDone={() => { setAdding(false); setNotice('订阅已保存，可在频道列表查看连接状态。') }} />}
     {editedSource && editedSubscription && <WorkspaceModal title={editedSource.name + ' · 订阅设置'} busy={mutation.isPending} onClose={() => setEditing(null)}>

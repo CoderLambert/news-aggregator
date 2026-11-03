@@ -22,6 +22,17 @@ def review_people(people):
 def recommend(user,source,category,key='recommend'):
     return client(user).post('/api/me/rss-recommendations/',{'source_id':source,'name':'Example feed','category_id':category.pk,'language':'en','note':'Useful feed','confirm_public_scope':True},format='json',HTTP_IDEMPOTENCY_KEY=key)
 
+def test_personal_profile_exposes_scope_only_to_its_subscriber(people):
+    owner, other = people
+    result = subscribe(owner)
+    connect_pending()
+    path = f"/api/smart-channels/sources/{result.data['source_id']}/"
+    profile = client(owner).get(path)
+    assert profile.status_code == 200
+    assert profile.data['publication'] == 'personal'
+    assert profile.data['collection_owner'] == 'miniflux'
+    assert client(other).get(path).status_code == 404
+
 def decision(user,candidate,version=1,key='decision',action='approve',reason=''):
     return client(user).post(f'/api/admin/rss/recommendations/{candidate}/decisions/',{'action':action,'expected_version':version,'reason':reason},format='json',HTTP_IDEMPOTENCY_KEY=key)
 
