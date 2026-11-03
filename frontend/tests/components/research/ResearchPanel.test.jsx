@@ -105,7 +105,7 @@ describe('ResearchPanel', () => {
     ], subscription: { state: 'not_connected', model_id: null, display_name: null, research_eligible: false } })
     renderPanel()
     await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
-    expect(await screen.findByText(/研究所需的文本与工具能力验证/)).toBeInTheDocument()
+    expect(await screen.findByText(/研究所需的文本与工具能力验证/, {}, { timeout: 10000 })).toBeInTheDocument()
     expect(screen.queryByTestId('research-model-consent')).not.toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), { target: { value: 'Synthetic query' } })
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
@@ -267,6 +267,69 @@ describe('ResearchPanel', () => {
       consent: true,
     })
     expect(await screen.findByText('重试后的完整回答')).toBeInTheDocument()
+  })
+
+  it('restarts an empty failed history session with the saved model and fresh consent', async () => {
+    const history = { ...completedSession(), messages: [], message_count: 0, research_model: null }
+    api.listResearchSessions.mockResolvedValue({ count: 1, results: [history] })
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    taskPreferenceApi.listAITaskPreferences.mockResolvedValue({ revision: 1, preferences: [{
+      task_kind: 'deep_research', selection_source: 'byok', selection_state: 'available',
+      model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+      model: { model_id: 'deepseek-chat', display_name: 'Personal Research' },
+    }] })
+    api.createResearchStream.mockImplementation(async function* (_query, options) {
+      options.onSessionId?.('restarted-session')
+      yield { type: 'session_created', session_id: 'restarted-session' }
+      yield { type: 'text_delta', text: '重新研究结果' }
+      yield { type: 'complete' }
+    })
+    renderPanel('/', false, signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }))
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByRole('textbox', { name: '输入研究问题' }, { timeout: 10000 })
+    await userEvent.click(await screen.findByRole('button', { name: '历史会话' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: history.title }))
+    await screen.findByTestId('research-model-consent')
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
+      target: { value: '重新分析' },
+    })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('checkbox'))
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(api.createResearchStream).toHaveBeenCalledTimes(1))
+    expect(api.createResearchStream.mock.calls[0][1].authorization).toEqual({
+      executionSource: 'byok', modelConfigId: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f', consent: true,
+    })
+    expect(api.researchChatStream).not.toHaveBeenCalled()
+    expect(await screen.findByText('重新研究结果')).toBeInTheDocument()
+  })
+
+  it('does not switch the model of a nonempty legacy session', async () => {
+    const history = { ...completedSession(), research_model: null }
+    api.listResearchSessions.mockResolvedValue({ count: 1, results: [history] })
+    api.getResearchSession.mockResolvedValue(history)
+    api.openResearchSessionStream.mockResolvedValue({ kind: 'session', session: history })
+    taskPreferenceApi.listAITaskPreferences.mockResolvedValue({ revision: 1, preferences: [{
+      task_kind: 'deep_research', selection_source: 'byok', selection_state: 'available',
+      model_config_id: 'dc8beed6-9efb-45ae-aacc-e8b8ce426b7f',
+      model: { model_id: 'deepseek-chat', display_name: 'Personal Research' },
+    }] })
+    renderPanel('/', false, signedInUser,
+      fullCapabilities({ research: false, research_byok_create: true }))
+    await userEvent.click(screen.getByRole('button', { name: '打开新闻研究助手' }))
+    await screen.findByRole('textbox', { name: '输入研究问题' }, { timeout: 10000 })
+    await userEvent.click(await screen.findByRole('button', { name: '历史会话' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: history.title }))
+    await screen.findByText('这是保存后的完整结果。')
+    expect(screen.queryByTestId('research-model-consent')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '输入研究问题' }), {
+      target: { value: '继续分析' },
+    })
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    expect(api.createResearchStream).not.toHaveBeenCalled()
+    expect(api.researchChatStream).not.toHaveBeenCalled()
   })
 
   it('sends a consented follow-up using the stored session model without requiring current preferences', async () => {

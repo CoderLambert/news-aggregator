@@ -1111,6 +1111,12 @@ export function useResearch(
     sessions,
     activeSessionId,
     sessionResearchModel: sessionQuery.data?.research_model ?? null,
+    canRestartEmptySession: Boolean(
+      sessionQuery.data?.id === activeSessionId
+      && sessionQuery.data?.message_count === 0
+      && sessionQuery.data?.messages.length === 0
+      && !sessionQuery.data?.research_model,
+    ),
     messages,
     phase,
     activeToolCalls,
