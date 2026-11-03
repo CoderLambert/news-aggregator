@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor, act } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import RssRecommendationsPage from '@/pages/admin/RssRecommendationsPage'
@@ -20,6 +20,19 @@ it('reviewer sees public queue without engine, role-management or self-approval 
   expect(screen.queryByRole('link', { name: '运行概览' })).not.toBeInTheDocument()
   expect(screen.queryByRole('link', { name: '频道审核员' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '通过审核' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('checkbox', { name: /选择推荐/ })).not.toBeInTheDocument()
+})
+
+it('selects only pending candidates the reviewer may decide, capped at ten per batch', async () => {
+  const eligible = Array.from({ length: 11 }, (_, i) => ({ ...row, candidate_id: `candidate-${i}`, name: `Feed ${i}`, can_review: true }))
+  vi.mocked(workspaceRequest).mockResolvedValue({ results: [row, ...eligible, { ...row, candidate_id: 'published', name: 'Published', can_review: true, state: 'published' }], count: 13, counts: {}, page: 1, page_size: 25 })
+  render(<QueryClientProvider client={client}><MemoryRouter><RssRecommendationsPage /></MemoryRouter></QueryClientProvider>)
+  await screen.findByText('Feed 0')
+  expect(screen.getAllByRole('checkbox')).toHaveLength(11)
+  fireEvent.click(screen.getByRole('button', { name: '选择本页前 10 个可审核项' }))
+  expect(screen.getByRole('button', { name: '批量审核（10/10）' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('checkbox', { name: '选择推荐 Feed 10' }))
+  expect(screen.getByRole('button', { name: '批量审核（11/10）' })).toBeDisabled()
 })
 
 it('hides cached review data when the server revokes authority', async () => {

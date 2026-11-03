@@ -5,18 +5,18 @@ import { MemoryRouter } from 'react-router-dom'
 import ChannelWorkspace from '@/pages/ChannelWorkspace'
 import { changeChannelSubscriptions } from '@/services/api'
 
-const state = vi.hoisted(() => ({ user: { id: 11, username: 'reader', isSuperuser: false }, enabled: true, error: false }))
+const state = vi.hoisted(() => ({ user: { id: 11, username: 'reader', isSuperuser: false }, enabled: true, error: false, subscriptions: [] }))
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: state.user, loading: false }) }))
 vi.mock('@/services/api', () => ({ changeChannelSubscriptions: vi.fn().mockResolvedValue([]), updateChannelGroup: vi.fn().mockResolvedValue({}) }))
 vi.mock('@/services/channelQueries', () => ({
-  useChannelConfig: () => ({ enabled: state.enabled, accounts: state.enabled, ready: true, error: state.error, retry: vi.fn(), roots: { data: [] }, groups: { data: [] }, subscriptions: { data: [] } }),
+  useChannelConfig: () => ({ enabled: state.enabled, accounts: state.enabled, ready: true, error: state.error, retry: vi.fn(), roots: { data: [] }, groups: { data: [] }, subscriptions: { data: state.subscriptions } }),
   useChannelMutation: () => useMutation({ mutationFn: perform => perform() }),
 }))
 vi.mock('@/services/workspaceApi', async importOriginal => {
   const original = await importOriginal()
   const common = { logo: '', region: 'international', language: 'en', source_type: 'news', topics: ['frontend'], news_count: 3, subscription_reason: '', origin: 'catalog', needs_review: false, url: 'https://react.dev', feed_url: '', reading_policy: 'standard', updated_at: null, evidence_hash: 'test' }
   return { ...original, workspaceRequest: vi.fn().mockResolvedValue({ results: [] }), workspaceCatalogOptions: () => ({ queryKey: ['workspace', 'catalog'], queryFn: async () => ({ topics: [{ key: 'frontend', name: '前端开发', description: 'Web' }], presets: [], sources: [
-    { ...common, id: 1, name: 'React Blog', description: 'React framework', subscription_status: 'active' },
+    { ...common, id: 1, name: 'React Blog', description: 'React framework', subscription_status: 'active', publication: 'personal', collection_owner: 'miniflux' },
     { ...common, id: 2, name: 'Retired Channel', description: 'Historical source', subscription_status: 'inactive' },
   ] }) }) }
 })
@@ -24,9 +24,26 @@ function setup(path = '/channels') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><ChannelWorkspace /></MemoryRouter></QueryClientProvider>)
 }
-beforeEach(() => { vi.clearAllMocks(); state.enabled = true; state.error = false })
+beforeEach(() => { vi.clearAllMocks(); state.enabled = true; state.error = false; state.subscriptions = [] })
 
 describe('channel workspace directory', () => {
+  it('offers recommendations only for an owned subscription and fences writes on config failure', async () => {
+    state.subscriptions = [{ source_id: 1 }]
+    state.error = true
+    setup()
+    await screen.findByRole('link', { name: 'React Blog' })
+    expect(screen.getByRole('button', { name: '推荐到公共频道' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 React Blog' }))
+    expect(screen.getByRole('button', { name: '推荐所选个人频道（1/10）' })).toBeDisabled()
+  })
+  it('enables single and batch recommendations for active personal subscriptions', async () => {
+    state.subscriptions = [{ source_id: 1 }]
+    setup()
+    await screen.findByRole('link', { name: 'React Blog' })
+    expect(screen.getByRole('button', { name: '推荐到公共频道' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 React Blog' }))
+    expect(screen.getByRole('button', { name: '推荐所选个人频道（1/10）' })).toBeEnabled()
+  })
   it('renders actual catalog rows and filters by the search input', async () => {
     setup()
     expect(await screen.findByRole('link', { name: 'React Blog' })).toBeInTheDocument()
@@ -46,6 +63,7 @@ describe('channel workspace directory', () => {
     setup()
     await screen.findByRole('link', { name: 'React Blog' })
     expect(screen.queryByRole('region', { name: '批量操作' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '推荐到公共频道' })).toBeNull()
     fireEvent.click(screen.getByRole('checkbox', { name: '选择 React Blog' }))
     expect(screen.getByRole('region', { name: '批量操作' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '批量订阅' }))

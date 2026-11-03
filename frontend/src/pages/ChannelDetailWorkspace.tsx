@@ -7,6 +7,9 @@ import { useChannelConfig, useChannelMutation } from '@/services/channelQueries'
 import { changeChannelSubscriptions } from '@/services/api'
 import { fetchReviewCategories, rssReviewKey } from '@/services/rssReviewApi'
 import AuthModal from '@/components/AuthModal'
+import { Button } from '@/components/ui/button'
+import RecommendChannelsDialog from '@/features/rss/RecommendChannelsDialog'
+import { canRecommendChannel } from '@/features/rss/recommendationEligibility'
 import { ChannelMark, TopicTags, Availability } from '@/components/workspace/ChannelIdentity'
 import { workspaceRequest, workspaceError, workspaceCatalogOptions, workspaceKeys, safeExternalUrl, originLabel, type ChannelProfile } from '@/services/workspaceApi'
 import { channelGroupPath } from '@/types/channels'
@@ -18,6 +21,7 @@ export default function ChannelDetailWorkspace() {
 }
 
 function Profile({ id }: { id: number }) {
+  const [recommending, setRecommending] = useState(false)
   const { user } = useAuth()
   const config = useChannelConfig()
   const mutation = useChannelMutation()
@@ -74,6 +78,12 @@ function Profile({ id }: { id: number }) {
         {config.enabled && <Link className="workspace-link" to="/channels/smart">使用智能整理 →</Link>}
       </section></aside></div>
     </>}
+    {source && subscription && config.enabled && canRecommendChannel(source) && <section className="workspace-panel">
+      <h2>推荐到公共频道</h2><p>个人订阅保持私有；审核通过后，可公开的文章会出现在公共频道。</p>
+      <Button variant="outline" disabled={!config.ready || !!config.error} onClick={() => setRecommending(true)}>推荐到公共频道</Button>
+      <Link className="ml-3" to="/channels/additions?tab=recommendations">查看我的推荐与审核状态</Link>
+    </section>}
+    {recommending && source && user && <RecommendChannelsDialog viewer={user.id} sources={[source]} onClose={() => setRecommending(false)} />}
     {login && <AuthModal onClose={() => setLogin(false)} />}
   </div>
 }

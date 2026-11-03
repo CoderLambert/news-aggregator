@@ -3,6 +3,7 @@ import { queryOptions } from '@tanstack/react-query'
 export type GroupingMode = 'off' | 'suggest' | 'auto'
 export interface Topic { key: string; name: string; description: string }
 export interface ChannelProfile {
+  publication?: 'personal' | 'public' | null; collection_owner?: string | null
   id: number; name: string; url: string; logo: string; region: string; language: string; source_type: string
   description: string; topics: string[]; origin: string; needs_review: boolean; evidence_hash: string
   subscription_status: 'active' | 'inactive'; subscription_reason: string; feed_url: string; policy_key: string

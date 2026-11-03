@@ -5,6 +5,9 @@ import { refreshRssViews } from '@/features/rss/queryRefresh'
 import { useAuth } from '@/context/AuthContext'
 import { useRssReviewGuard } from '@/features/rss/useRssReviewGuard'
 import AdminLayout from '@/components/admin/AdminLayout'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import ReviewRecommendationsDialog from '@/features/rss/ReviewRecommendationsDialog'
 import { decideRecommendation, fetchReviewCategories, fetchRecommendation, fetchRecommendations, recommendationLabels, rssReviewKey, verifyRecommendation } from '@/services/rssReviewApi'
 import type { Recommendation } from '@/services/rssReviewApi'
 import { workspaceError } from '@/services/workspaceApi'
@@ -49,6 +52,8 @@ export default function RssRecommendationsPage() {
   return <ReviewSession key={`${user.id}:${user.rssCapabilities?.reviewerVersion ?? 0}`} viewer={user.id} epoch={user.rssCapabilities?.reviewerVersion ?? 0} />
 }
 function ReviewSession({ viewer, epoch }: { viewer: number; epoch: number }) {
+  const [selected, setSelected] = useState<string[]>([])
+  const [reviewing, setReviewing] = useState<Recommendation[] | null>(null)
   const [params, setParams] = useSearchParams(); const [search, setSearch] = useState(params.get('q') ?? '')
   const status = params.get('status') ?? 'pending'; const page = params.get('page') ?? '1'; const size = params.get('page_size') ?? '25'
   const query = new URLSearchParams({ q: params.get('q') ?? '', status, page, page_size: size }).toString()
@@ -69,14 +74,24 @@ function ReviewSession({ viewer, epoch }: { viewer: number; epoch: number }) {
     if (changed) void refreshRssViews(client, viewer)
   }, [list.data, client, viewer, query])
   const denied = useRssReviewGuard(list.error)
+  const eligible = (list.data?.results ?? []).filter(row => row.can_review && row.state === 'pending')
+  const selectedRows = eligible.filter(row => selected.includes(row.candidate_id))
   if (denied) return <AdminLayout><p role="alert">审核权限已改变，正在重新确认账号权限。</p></AdminLayout>
   const change = (key: string, value: string | null) => { const next = new URLSearchParams(params); if (value === null) next.delete(key); else next.set(key, value); if (!['page', 'candidate'].includes(key)) { next.set('page', '1'); next.delete('candidate') } setParams(next) }
   return <AdminLayout><section className="rss-channel-verification"><header className="workspace-page-heading"><div><h1>公开频道审核</h1><p>人工审核与连接核验都通过后，频道才会开放公共订阅。</p></div></header>
     <nav className="rss-counts" aria-label="审核状态">{['pending', 'approved', 'published', 'all'].map(state => <button key={state} aria-pressed={status === state} onClick={() => change('status', state)}>{state === 'all' ? '全部' : recommendationLabels[state]} <strong>{state === 'all' ? Object.values(list.data?.counts ?? {}).reduce((a, b) => a + b, 0) : list.data?.counts?.[state] ?? '—'}</strong></button>)}</nav>
     <form role="search" className="rss-review-search" onSubmit={e => { e.preventDefault(); change('q', search.trim()) }}><label>搜索公开推荐<input value={search} maxLength={200} onChange={e => setSearch(e.target.value)} /></label><button className="workspace-button secondary">搜索</button><label>审核状态<select value={status} onChange={e => change('status', e.target.value)}><option value="all">全部</option>{Object.entries(recommendationLabels).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label><label>每页条数<select value={size} onChange={e => change('page_size', e.target.value)}><option value="25">25</option><option value="50">50</option></select></label></form>
     {list.isPending && <p role="status">正在读取推荐队列…</p>}{list.error && <p role="alert">{workspaceError(list.error)}<button onClick={() => void list.refetch()}>重新加载</button></p>}{list.data?.count === 0 && <p role="status">没有符合条件的公开推荐。</p>}
-    {list.data?.results.map(row => <article key={row.candidate_id} className="rss-addition-row"><h2><button className="workspace-link" onClick={() => change('candidate', row.candidate_id)}>{row.name}</button></h2><p className="rss-feed-url">{row.feed_url}</p><p>{recommendationLabels[row.state]} · {row.category_name}</p>{row.error_code && <p>{verificationError(row.error_code)}</p>}</article>)}
+    {eligible.length > 0 && <div className="my-3 flex flex-wrap items-center gap-3">
+      <Button variant="outline" onClick={() => setSelected(eligible.slice(0, 10).map(row => row.candidate_id))}>选择本页前 10 个可审核项</Button>
+      <Button disabled={!selectedRows.length || selectedRows.length > 10 || list.isError} onClick={() => setReviewing(selectedRows)}>批量审核（{selectedRows.length}/10）</Button>
+      <Button variant="ghost" onClick={() => setSelected([])}>清空选择</Button>
+    </div>}
+    {list.data?.results.map(row => <article key={row.candidate_id} className="rss-addition-row">
+      {row.can_review && row.state === 'pending' && <Checkbox aria-label={`选择推荐 ${row.name}`} checked={selected.includes(row.candidate_id)} onChange={e => setSelected(current => e.target.checked ? [...current, row.candidate_id] : current.filter(id => id !== row.candidate_id))} />}
+      <h2><button className="workspace-link" onClick={() => change('candidate', row.candidate_id)}>{row.name}</button></h2><p className="rss-feed-url">{row.feed_url}</p><p>{recommendationLabels[row.state]} · {row.category_name}</p>{row.error_code && <p>{verificationError(row.error_code)}</p>}</article>)}
     <nav className="rss-pagination" aria-label="推荐分页"><button disabled={Number(page) <= 1} onClick={() => change('page', String(Number(page) - 1))}>上一页</button><span>第 {page} 页 · 共 {list.data?.count ?? 0} 条</span><button disabled={!list.data || Number(page) * Number(size) >= list.data.count} onClick={() => change('page', String(Number(page) + 1))}>下一页</button></nav>
     {params.get('candidate') && <Details key={params.get('candidate')} id={params.get('candidate')!} viewer={viewer} epoch={epoch} close={() => change('candidate', null)} />}
+    {reviewing && <ReviewRecommendationsDialog viewer={viewer} rows={reviewing} onClose={() => { setReviewing(null); setSelected([]) }} />}
   </section></AdminLayout>
 }
