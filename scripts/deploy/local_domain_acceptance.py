@@ -37,6 +37,7 @@ CURL_FAILURE_KINDS = {
     52: 'empty server response',
     56: 'connection reset',
     60: 'TLS certificate verification failure',
+    92: 'HTTP/2 stream reset',
 }
 
 
@@ -558,7 +559,10 @@ def _curl_command(args: argparse.Namespace, path: str, *, scheme: str = 'https',
     if body is not None:
         command.extend(['--data-binary', body])
     if request_target is not None:
-        command.extend(['--request-target', request_target])
+        # Absolute-form targets exercise HTTP/1 host routing. HTTP/2 :path
+        # contains only path/query (RFC 9113 8.3.1), so negotiating h2 here
+        # tests a malformed pseudo-header instead of the Host guard.
+        command.extend(['--http1.1', '--request-target', request_target])
     command.append(f'{scheme}://{HOST}:{resolved_port}{path}')
     return command
 
@@ -591,8 +595,10 @@ def _curl(args: argparse.Namespace, path: str, **kwargs) -> tuple[int, str, subp
 
 
 def _curl_closed_without_http_response(result: subprocess.CompletedProcess, *, scheme: str) -> bool:
-    """Accept only the expected connection-close curl codes with no HTTP response."""
-    allowed_exit_codes = {'http': {52}, 'https': {52, 56}}
+    """Accept a connection/stream close only when no HTTP response was sent."""
+    # Nginx 444 resets an HTTP/2 stream (CURLE_HTTP2_STREAM), while HTTP/1
+    # reports an empty reply or TLS EOF. TLS/DNS/timeouts still fail this gate.
+    allowed_exit_codes = {'http': {52}, 'https': {52, 56, 92}}
     if result.returncode not in allowed_exit_codes.get(scheme, set()):
         return False
     output_body, marker, status = result.stdout.rpartition(STATUS_MARKER)

@@ -28,7 +28,7 @@ def _link_verified(link):
             and binding.applied_policy_version == binding.policy_version)
 
 
-def _status_from_links(links, blocked):
+def _status_from_links(links, blocked, *, policy_links=None):
     from api.rss.feed_policy import assert_binding_policy
     from api.rss.operations import OperationError
     # A paused physical feed remains subscribable: subscribing reconciles its references.
@@ -38,7 +38,8 @@ def _status_from_links(links, blocked):
             if link.binding_id in blocked:
                 continue
             try:
-                assert_binding_policy(link.binding)
+                assert_binding_policy(link.binding, source_links=(
+                    policy_links[link.binding_id] if policy_links is not None else None))
             except OperationError:
                 continue
             return 'active', ''
@@ -114,10 +115,17 @@ def prime_subscription_status(sources):
         if _link_verified(link):
             verified_ids.append(link.binding_id)
     blocked = unresolved_control_binding_ids(verified_ids)
+    # Admission intersects every relation of the physical feed, not just the
+    # enabled/public links selected for the visible catalog above.
+    policy_links = {binding_id: [] for binding_id in verified_ids}
+    for link in SourceFeedLink.objects.filter(binding_id__in=verified_ids).select_related('source__publication'):
+        policy_links[link.binding_id].append(link)
     from api.services.source_policy import source_config_snapshot
-    with source_config_snapshot():
+    from api.rss.feed_policy import catalog_policy_snapshot
+    with source_config_snapshot(), catalog_policy_snapshot():
         for source in pending:
-            source._rss_subscription_status = _status_from_links(grouped.get(source.pk, []), blocked)
+            source._rss_subscription_status = _status_from_links(
+                grouped.get(source.pk, []), blocked, policy_links=policy_links)
 
 
 def rss_status(source):
