@@ -242,6 +242,25 @@ def prepare_article_previews(user, articles):
     return snapshots
 
 
+def _membership_counts(querysets):
+    """Aggregate distinct authorized (source, article) pairs inside the DB.
+
+    Django cannot annotate after UNION. Compile its parameterized queries and
+    only wrap that trusted SQL; no request strings are interpolated here.
+    """
+    if not querysets:
+        return {}
+    from django.db import connections
+    memberships = querysets[0].union(*querysets[1:]).order_by()
+    database = connections[memberships.db]
+    sql, params = memberships.query.get_compiler(using=memberships.db).as_sql()
+    with database.cursor() as cursor:
+        cursor.execute(
+            f'WITH memberships(source_id, news_id) AS ({sql}) '
+            'SELECT source_id, COUNT(DISTINCT news_id) FROM memberships GROUP BY source_id', params)
+        return dict(cursor.fetchall())
+
+
 def with_authorized_source_counts(user, sources):
     """Count authorized members once per path, then attach the totals.
 
@@ -250,8 +269,7 @@ def with_authorized_source_counts(user, sources):
     legacy-key, and engine-link rules, and keep public-membership channels on
     their own explicit entries.
     """
-    from collections import Counter
-    from django.db.models import IntegerField
+    from django.db.models import Count, IntegerField
     from api.rss.public_membership import public_entries_for_sources
     rows = list(sources.annotate(_rss_count_source_key=Case(
         *[When(name=policy.name, then=Value(policy.key)) for policy in POLICIES.values()],
@@ -264,30 +282,30 @@ def with_authorized_source_counts(user, sources):
     regular_ids = [pk for pk, _key in regular]
     key_to_source = {key: pk for pk, key in regular if key}
     authorized = authorized_news(user)
-    pairs = set()
+    paths = []
     if regular_ids:
-        pairs.update(authorized.filter(source_id__in=regular_ids).values_list('source_id', 'pk'))
-        pairs.update(EngineEntryMap.objects.filter(
+        paths.append(authorized.filter(source_id__in=regular_ids).order_by().values_list('source_id', 'pk'))
+        paths.append(EngineEntryMap.objects.filter(
             disposition='linked', news_id__in=authorized.values('pk'),
             binding__source_links__source_id__in=regular_ids,
             binding__source_links__association_policy=ALL_ENTRIES,
-        ).values_list('binding__source_links__source_id', 'news_id'))
+        ).order_by().values_list('binding__source_links__source_id', 'news_id'))
     if key_to_source:
-        for key, news_id in NewsSourceItem.objects.filter(
+        paths.append(NewsSourceItem.objects.filter(
             news_id__in=authorized.values('pk'), source_key__in=key_to_source,
-        ).values_list('source_key', 'news_id'):
-            source_id = key_to_source.get(key)
-            if source_id is not None:
-                pairs.add((source_id, news_id))
-    regular_counts = Counter(source_id for source_id, _news_id in pairs)
-    public_counts = Counter()
+        ).annotate(_count_source_id=Case(
+            *[When(source_key=key, then=Value(pk)) for key, pk in key_to_source.items()],
+            output_field=IntegerField(),
+        )).order_by().values_list('_count_source_id', 'news_id'))
+    regular_counts = _membership_counts(paths)
+    public_counts = {}
     if public_ids:
-        public_pairs = set(public_entries_for_sources(Source.objects.filter(pk__in=public_ids)).filter(
+        public_counts = dict(public_entries_for_sources(Source.objects.filter(pk__in=public_ids)).filter(
             entry__news_id__in=authorized.values('pk'),
-        ).values_list('source_id', 'entry__news_id'))
-        public_counts.update(source_id for source_id, _news_id in public_pairs)
+        ).order_by().values('source_id').annotate(total=Count('entry__news_id', distinct=True))
+            .values_list('source_id', 'total'))
     totals = {
-        pk: public_counts[pk] if public else regular_counts[pk]
+        pk: public_counts.get(pk, 0) if public else regular_counts.get(pk, 0)
         for pk, _key, public in rows
     }
     return sources.annotate(rss_news_count=Case(

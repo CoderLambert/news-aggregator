@@ -5,6 +5,8 @@ cannot revoke an already dispatched remote request. Content completeness remains
 unknown independently of the mode selected here.
 """
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
 import re
 from urllib.parse import urlsplit
 
@@ -16,6 +18,21 @@ from api.services.source_policy import (POLICIES, all_policies, config_for_sourc
 BODY_POLICIES = frozenset({'standard', 'public_feed', 'public_rss', 'official_html', 'regulatory_data'})
 SUMMARY_POLICIES = frozenset({'summary_only', 'rss_summary_only'})
 ALL = {'version': 1, 'mode': 'all'}
+_catalog_snapshot = ContextVar('feed_policy_catalog_snapshot', default=None)
+
+
+@contextmanager
+def catalog_policy_snapshot():
+    """Reuse pure URL/policy work only inside one read-only catalog response.
+
+    Never retain admission decisions across requests or use this around writes.
+    SourceConfig rows are captured by the caller's source_config_snapshot.
+    """
+    token = _catalog_snapshot.set(({}, {}))
+    try:
+        yield
+    finally:
+        _catalog_snapshot.reset(token)
 
 # T27 public Miniflux feed-mode samples, two entries per exact endpoint (2026-10-16).
 # This is a mode decision, NOT proof every entry is complete or a verified badge.
@@ -46,7 +63,13 @@ def full_content_enabled():
 
 def _canonical(value):
     from api.rss.operations import canonicalize_feed_url
-    return canonicalize_feed_url(value)
+    snapshot = _catalog_snapshot.get()
+    if snapshot is None:
+        return canonicalize_feed_url(value)
+    canonical, _ = snapshot
+    if value not in canonical:
+        canonical[value] = canonicalize_feed_url(value)
+    return canonical[value]
 
 
 def is_wechat_article_url(url):
@@ -95,6 +118,17 @@ def known_feed_content_kind(feed_url):
 
 
 def _policies_for_url(url):
+    snapshot = _catalog_snapshot.get()
+    if snapshot is None:
+        return _read_policies_for_url(url)
+    _, policies = snapshot
+    if url not in policies:
+        policies[url] = tuple(_read_policies_for_url(url))
+    # Callers add binding-specific restrictions; never mutate the cached tuple.
+    return list(policies[url])
+
+
+def _read_policies_for_url(url):
     """Exact feed URLs cover separate syndication hosts; host rules add limits."""
     from api.rss.operations import OperationError
     policies = []
@@ -185,7 +219,7 @@ def approved_feed_policy(feed_url):
     return _gateway_policy(url,_decide(url, _policies_for_url(url)))
 
 
-def assert_binding_policy(binding, *, desired_mode=None, enabled=True):
+def assert_binding_policy(binding, *, desired_mode=None, enabled=True, source_links=None):
     """Intersection of feed URL, every associated source and current publication.
 
     Disabling an existing physical feed must always remain possible. A disabled
@@ -197,7 +231,11 @@ def assert_binding_policy(binding, *, desired_mode=None, enabled=True):
     url = _canonical(binding.canonical_feed_url)
     policies = _policies_for_url(url)
     publications = []
-    for link in binding.source_links.select_related('source__publication'):
+    # Catalog reads may supply a freshly fetched batch including *all* links,
+    # even disabled/private ones. Mutation callers always read current relations.
+    if source_links is None:
+        source_links = binding.source_links.select_related('source__publication')
+    for link in source_links:
         if link.association_policy != ALL:
             raise OperationError('unsupported_association_policy')
         publication = getattr(link.source, 'publication', None)

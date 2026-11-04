@@ -71,29 +71,8 @@ export default defineConfig({
     fs: { allow: [".."] },
   },
   build: {
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes("node_modules")) {
-            if (
-              id.match(/[\\/](react|react-dom|react-router-dom|scheduler)[\\/]/)
-            ) {
-              return "react-vendor";
-            }
-            if (
-              id.match(
-                /[\\/](react-markdown|remark-gfm|micromark|mdast-|hast-|unified|vfile|trim-)/,
-              )
-            ) {
-              return "markdown-vendor";
-            }
-            if (id.includes("markstream-react")) {
-              return "markstream-vendor";
-            }
-          }
-        },
-      },
-    },
+    // Let Rolldown preserve the lazy route boundaries. Manual vendor groups
+    // pulled shared React helpers into the Markdown chunk and made it eager.
     chunkSizeWarningLimit: 1000,
   },
   test: {

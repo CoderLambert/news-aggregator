@@ -6,8 +6,16 @@ import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { queryClient } from '@/services/queryClient'
 import { usePreferencesStore } from '@/stores/preferences'
 import NewsList from '@/pages/NewsList'
-import { fetchCategories, fetchCsrfToken, fetchMe, fetchNews, fetchSources, loginUser, logoutUser, registerUser } from '@/services/api'
+import FeedWorkspace from '@/components/workspace/FeedWorkspace'
+import { workspaceRequest } from '@/services/workspaceApi'
+import { fetchCategories, fetchCsrfToken, fetchMe, fetchNews, fetchSources, loginUser, logoutUser, registerUser,
+  fetchChannelSubscriptions, fetchChannelGroups, fetchChannelGroupRoots, fetchNewsPreferences } from '@/services/api'
 import { CapabilitiesTestProvider } from '../helpers/capabilities'
+
+vi.mock('@/services/workspaceApi', async (importOriginal) => ({
+  ...await importOriginal(), workspaceRequest: vi.fn().mockImplementation(path => Promise.resolve(
+    path.includes('reading-stats') ? { week: [], today: 0, total: 0, streak: 0, timezone: 'UTC' } : { stories: [] })),
+}))
 
 vi.mock('@/services/api', () => ({
   fetchChannelSubscriptions: vi.fn().mockResolvedValue([]),
@@ -58,14 +66,14 @@ function AuthControls() {
   )
 }
 
-function renderAuthenticatedList() {
+function renderAuthenticatedList(path = '/') {
   return render(
     <QueryClientProvider client={queryClient}>
       <CapabilitiesTestProvider client={queryClient}>
         <AuthProvider>
-          <MemoryRouter initialEntries={['/']}>
+          <MemoryRouter initialEntries={[path]}>
             <AuthControls />
-            <NewsList />
+            <FeedWorkspace><NewsList /></FeedWorkspace>
           </MemoryRouter>
         </AuthProvider>
       </CapabilitiesTestProvider>
@@ -88,6 +96,10 @@ beforeEach(() => {
   registerUser.mockResolvedValue({ id: 3, username: 'reader-three' })
   fetchCategories.mockResolvedValue([])
   fetchSources.mockResolvedValue([])
+  fetchChannelSubscriptions.mockResolvedValue([])
+  fetchChannelGroups.mockResolvedValue([])
+  fetchChannelGroupRoots.mockResolvedValue([])
+  fetchNewsPreferences.mockResolvedValue({ scope: 'all', group_id: null })
   fetchNews.mockImplementation(() => fetchNews.mock.calls.length === 1
     ? Promise.resolve(page('Private story for account one'))
     : nextListResponse.promise)
@@ -96,6 +108,43 @@ beforeEach(() => {
 afterEach(() => queryClient.clear())
 
 describe('NewsList authentication transitions', () => {
+  it('loads explicit all-news without waiting for personal configuration or preferences', async () => {
+    const pending = deferred().promise
+    fetchChannelSubscriptions.mockReturnValue(pending)
+    fetchChannelGroups.mockReturnValue(pending)
+    fetchChannelGroupRoots.mockReturnValue(pending)
+    fetchNewsPreferences.mockReturnValue(pending)
+    renderAuthenticatedList('/?scope=all')
+    expect(await screen.findByRole('heading', { name: 'Private story for account one' })).toBeInTheDocument()
+  })
+
+  it('uses the saved all-news scope without waiting for sidebar groups', async () => {
+    fetchChannelGroups.mockReturnValue(deferred().promise)
+    renderAuthenticatedList()
+    expect(await screen.findByRole('heading', { name: 'Private story for account one' })).toBeInTheDocument()
+  })
+
+  it('keeps a private group closed until its membership has loaded', async () => {
+    fetchChannelGroups.mockReturnValue(deferred().promise)
+    renderAuthenticatedList('/?scope=group&group_id=7')
+    await waitFor(() => expect(screen.getByTestId('viewer')).toHaveTextContent('1'))
+    expect(fetchNews).not.toHaveBeenCalled()
+  })
+
+  it('starts filter statistics after the initial news request settles', async () => {
+    fetchNews.mockReturnValue(nextListResponse.promise)
+    renderAuthenticatedList('/?scope=all')
+    await waitFor(() => expect(fetchNews).toHaveBeenCalledOnce())
+    expect(fetchCategories).not.toHaveBeenCalled()
+    expect(fetchSources).not.toHaveBeenCalled()
+    expect(workspaceRequest).not.toHaveBeenCalled()
+    await act(async () => { nextListResponse.resolve(page('News before statistics')) })
+    await waitFor(() => expect(fetchSources).toHaveBeenCalledOnce())
+    expect(fetchCategories).toHaveBeenCalledOnce()
+    await waitFor(() => expect(workspaceRequest).toHaveBeenCalledWith('/smart-channels/dashboard/', expect.anything()))
+    expect(screen.getByRole('heading', { name: 'News before statistics' })).toBeInTheDocument()
+  })
+
   it('hides the previous user list while the anonymous list request is pending after logout', async () => {
     renderAuthenticatedList()
     expect(await screen.findByRole('heading', { name: 'Private story for account one' })).toBeInTheDocument()

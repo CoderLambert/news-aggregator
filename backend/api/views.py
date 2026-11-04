@@ -280,7 +280,6 @@ class NewsListView(generics.ListAPIView):
         representation = request.query_params.get('representation', 'summary')
         if representation != 'summary':
             raise ApiValidationError({'representation': 'Only summary is supported; use the detail endpoint for complete content.'})
-        self.visible_queryset()  # Validate reading conditions before service fallback.
         search_query = request.query_params.get('search', '').strip()
         mode = request.query_params.get('mode', 'keyword').strip()
 
@@ -291,6 +290,9 @@ class NewsListView(generics.ListAPIView):
                 applied='keyword',
             )
 
+        # The ordinary DRF list validates and builds the authorized queryset
+        # itself. Only vector paths need this explicit pre-service validation.
+        self.visible_queryset()
         try:
             if mode == 'semantic':
                 response = self._semantic_search(request, search_query)

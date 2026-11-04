@@ -19,9 +19,9 @@ export function useNewsScope(params: URLSearchParams, setParams: SetURLSearchPar
   const validGroup = scope !== 'group' || config.groups.data?.some(g => g.id === groupId)
   const invalidScope = config.accounts && raw !== null && !newsScopes.includes(raw as NewsScope)
   const needsLogin = config.accounts && !config.enabled && scope !== 'all'
-  const configError = config.error || (config.enabled && preference.isError)
+  const configError = (scope !== 'all' && config.error) || (config.enabled && raw === null && preference.isError)
   const ready = !migrating && !invalidScope && !needsLogin && (!config.enabled ||
-    (config.ready && preference.isSuccess && raw !== null && validGroup))
+    (raw !== null && (scope === 'all' || (config.ready && validGroup))))
   const lastSaved = useRef('')
 
   useEffect(() => {
@@ -33,14 +33,15 @@ export function useNewsScope(params: URLSearchParams, setParams: SetURLSearchPar
       setParams(next, { replace: true })
       return
     }
-    if (!config.enabled || !config.ready || !preference.isSuccess) return
+    if (!config.enabled) return
     if (raw === null) {
+      if (!preference.isSuccess) return
       const next = new URLSearchParams(params)
       next.set('scope', preference.data.scope)
       if (preference.data.group_id !== null) next.set('group_id', String(preference.data.group_id))
       else next.delete('group_id')
       setParams(next, { replace: true })
-    } else if (scope === 'group' && !validGroup) {
+    } else if (scope === 'group' && config.ready && !validGroup) {
       const next = new URLSearchParams(params)
       next.set('scope', 'subscribed'); next.delete('group_id'); next.delete('source'); next.delete('page')
       setParams(next, { replace: true, state: { scopeNotice: 'group-unavailable' } })
@@ -48,13 +49,13 @@ export function useNewsScope(params: URLSearchParams, setParams: SetURLSearchPar
   }, [config.accounts, config.enabled, config.ready, migrating, params, preference.data, preference.isSuccess, raw, scope, setParams, validGroup])
 
   useEffect(() => {
-    if (!ready || !config.enabled || configError) return
+    if (!ready || !config.enabled || configError || !preference.isSuccess) return
     const signature = `${config.viewer}:${scope}:${groupId ?? ''}`
     if (lastSaved.current === signature) return
     lastSaved.current = signature
     if (preference.data?.scope === scope && preference.data.group_id === (groupId ?? null)) return
     mutate({ scope, group_id: groupId ?? null })
-  }, [config.enabled, config.viewer, configError, groupId, mutate, preference.data, ready, scope])
+  }, [config.enabled, config.viewer, configError, groupId, mutate, preference.data, preference.isSuccess, ready, scope])
 
   const subscriptionIds = (config.subscriptions.data ?? []).filter(s => scope !== 'ungrouped' || s.group_ids.length === 0).map(s => s.source_id)
   const sourceIds = scope === 'all' ? null : scope === 'group'

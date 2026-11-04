@@ -98,6 +98,58 @@ def test_source_counts_follow_the_reader_and_not_other_owners(engine, category):
     assert dict(owned.values_list('pk', 'rss_news_count')) == {public.pk: 1, personal.pk: 1}
 
 
+def test_catalog_policy_queries_do_not_grow_per_binding_and_recheck_revocation(engine):
+    from api.rss.models import SourceFeedLink
+    ready = [public_rss_source(Source.objects.create(
+        name=f'Batch policy {index}', url=f'https://batch.example/{index}')) for index in range(2)]
+    _, small = _queries(APIClient(), '/api/sources/', {'purpose': 'history'})
+    ready.extend(public_rss_source(Source.objects.create(
+        name=f'Batch policy {index}', url=f'https://batch.example/{index}')) for index in range(2, 18))
+    response, large = _queries(APIClient(), '/api/sources/', {'purpose': 'history'})
+    assert len(large) <= len(small) + 1
+    assert all(row['can_subscribe'] for row in response.data if row['id'] in {s.pk for s in ready})
+    # Even a disabled link to a restricted source must still constrain a shared binding.
+    forbidden = Source.objects.create(name='Restricted shared feed', url='https://www.reuters.com/rss')
+    SourcePublication.objects.create(source=forbidden, publication='personal', owner='miniflux')
+    SourceFeedLink.objects.create(source=forbidden, binding=ready[0].feed_links.get().binding,
+                                 enabled=False, association_policy={'version': 1, 'mode': 'all'})
+    response, _ = _queries(APIClient(), '/api/sources/', {'purpose': 'history'})
+    assert next(row for row in response.data if row['id'] == ready[0].pk)['can_subscribe'] is False
+
+
+def test_keyword_list_builds_reader_access_once(engine, category):
+    from unittest.mock import patch
+    from api.rss.access import annotate_article_access
+    source = public_rss_source(Source.objects.create(name='Single read', url='https://single.example'))
+    article = _story(source, category, 'single-read')
+    with patch('api.views.annotate_article_access', wraps=annotate_article_access) as annotate:
+        response, _ = _queries(APIClient(), '/api/news/', {'page_size': 20})
+    assert [row['id'] for row in response.data['results']] == [article.pk]
+    assert annotate.call_count == 1
+
+
+def test_default_feed_can_filter_duplicates_in_publish_order(engine, category):
+    from api.views import NewsListView
+    from rest_framework.test import APIRequestFactory
+    source = public_rss_source(Source.objects.create(name='Ordered read', url='https://ordered.example'))
+    _story(source, category, 'ordered-read')
+    view = NewsListView()
+    view.request = view.initialize_request(APIRequestFactory().get('/api/news/'))
+    plan = view.filter_queryset(view.get_queryset())[:20].explain()
+    assert 'USE TEMP B-TREE FOR ORDER BY' not in plan
+
+
+def test_source_counts_deduplicate_overlapping_membership_paths(engine, category):
+    source = public_rss_source(Source.objects.create(name='WebKit', url='https://webkit.org'))
+    article = _story(source, category, 'overlapping-paths')
+    NewsSourceItem.objects.create(source_key='webkit', upstream_id='overlapping-paths',
+                                 news=article, discovery_url=article.url)
+    EngineEntryMap.objects.create(binding=source.feed_links.get().binding,
+        engine_entry_id=article.pk, news=article, source_url=article.url, disposition='linked')
+    counts = with_authorized_source_counts(None, Source.objects.filter(pk=source.pk))
+    assert counts.get().rss_news_count == 1
+
+
 def test_group_feed_uses_source_membership_and_keeps_reader_filters(engine, category):
     user = get_user_model().objects.create_user('group-reader')
     outside = public_rss_source(Source.objects.create(name='Outside', url='https://outside.example'))

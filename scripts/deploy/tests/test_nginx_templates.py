@@ -99,6 +99,7 @@ def test_production_hosts_redirects_unknown_hosts_and_static_routing():
     assert production.count('try_files $uri =404;') >= 8
     assert 'ssl_certificate /etc/letsencrypt/live/news.lambert.host/fullchain.pem;' in production
     assert 'ssl_certificate_key /etc/letsencrypt/live/news.lambert.host/privkey.pem;' in production
+    assert 'http2 on;' in https_server
     assert 'root /srv/newshub/current;' in production
     assert 'location = /index.html' in https_server
     assert 'add_header Cache-Control "no-store" always;' in _block(
@@ -185,13 +186,25 @@ def test_only_approved_sse_paths_disable_nginx_buffering_and_compression():
 def test_json_compression_is_scoped_to_exact_public_news_list():
     production = (NGINX_DIR / 'news.lambert.host.conf').read_text()
     listing = _block(production, 'location = /api/news/ {')
-    assert production.count('gzip on;') == 1
+    assert production.count('gzip on;') == 3
     assert 'gzip_types application/json;' in listing
     assert 'gzip_vary on;' in listing
     assert 'gzip_comp_level 5;' in listing
     assert 'gzip_min_length 1024;' in listing
     assert 'include /etc/nginx/snippets/newshub-proxy.conf;' in listing
     assert 'add_header Cache-Control "no-store" always;' in listing
+    assert 'gzip on;' not in _block(production, 'location /api/ {')
+
+
+def test_static_compression_preserves_immutable_caching_without_compressing_private_apis():
+    production = (NGINX_DIR / 'news.lambert.host.conf').read_text()
+    for marker in ('location ~* "^/assets/', 'location /assets/'):
+        assets = _block(production, marker)
+        assert 'gzip on;' in assets
+        assert 'gzip_types text/css application/javascript image/svg+xml;' in assets
+        assert 'gzip_vary on;' in assets
+        assert 'try_files $uri =404;' in assets
+        assert 'application/json' not in assets
     assert 'gzip on;' not in _block(production, 'location /api/ {')
 
 

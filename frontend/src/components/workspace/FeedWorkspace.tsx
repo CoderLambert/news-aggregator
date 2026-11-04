@@ -5,22 +5,25 @@ import { useQuery } from '@tanstack/react-query'
 import { RefreshCw, Sparkles } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useCapability } from '@/context/CapabilitiesContext'
+import { FeedLoadingContext } from '@/context/FeedLoadingContext'
 import { workspaceRequest, workspaceKeys, type Dashboard, type ReadingStats } from '@/services/workspaceApi'
 
 export default function FeedWorkspace({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   const accounts = useCapability('accounts').enabled
   const viewer = user?.id ?? 'anonymous'
+  const [loadedViewer, setLoadedViewer] = useState<number | string | null>(null)
+  const feedLoaded = !loading && loadedViewer === viewer
   const [offset, setOffset] = useState(0)
-  const dashboard = useQuery({ queryKey: ['workspace', viewer, 'dashboard'], enabled: !loading,
+  const dashboard = useQuery({ queryKey: ['workspace', viewer, 'dashboard'], enabled: feedLoaded,
     queryFn: ({ signal }) => workspaceRequest<Dashboard>('/smart-channels/dashboard/', { signal }), staleTime: 60_000 })
-  const stats = useQuery({ queryKey: workspaceKeys.stats(viewer), enabled: accounts && !!user && !loading,
+  const stats = useQuery({ queryKey: workspaceKeys.stats(viewer), enabled: accounts && !!user && feedLoaded,
     queryFn: ({ signal }) => workspaceRequest<ReadingStats>('/me/reading-stats/', { signal }) })
   const stories = dashboard.data?.stories ?? []
   const visible = stories.slice(offset < stories.length ? offset : 0, (offset < stories.length ? offset : 0) + 5)
   const max = Math.max(1, ...(stats.data?.week.map(day => day.count) ?? []))
   return <div className="feed-workspace">
-    <section className="feed-workspace-content" aria-label="资讯阅读列表">{children}</section>
+    <section className="feed-workspace-content" aria-label="资讯阅读列表"><FeedLoadingContext.Provider value={setLoadedViewer}>{children}</FeedLoadingContext.Provider></section>
     <aside className="feed-workspace-aside workspace-scroll">
       <section className="workspace-panel"><header className="workspace-panel-heading"><h2>{dashboard.data?.kind === 'popular' ? '近期热读' : '最新更新'}</h2>
         <button type="button" className="workspace-link" disabled={stories.length <= 5} onClick={() => setOffset(current => current === 0 ? 5 : 0)}><RefreshCw size={13} aria-hidden="true" />换一批</button>

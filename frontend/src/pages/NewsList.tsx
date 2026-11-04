@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
+import { FeedLoadingContext } from '@/context/FeedLoadingContext'
 import { useLanguage } from '@/context/useLanguage'
 import { categoryOptions, newsListOptions, sourceOptions } from '@/services/newsQueries'
 import type { NewsListParams, NewsSummary, SearchMode } from '@/types/news'
@@ -122,8 +123,9 @@ export default function NewsList() {
     // Changing reading conditions clears old results and aborts their requests.
     placeholderData: undefined,
   })
-  const categoriesQuery = useQuery(categoryOptions(lang))
-  const sourcesQuery = useQuery(sourceOptions(lang, viewerId, 'history'))
+  const loadFilters = !authLoading && (!newsQuery.isPending || invalidRegion || reading.configError || reading.needsLogin || reading.invalidScope)
+  const categoriesQuery = useQuery({ ...categoryOptions(lang), enabled: loadFilters })
+  const sourcesQuery = useQuery({ ...sourceOptions(lang, viewerId, 'history'), enabled: loadFilters })
   const currentViewerId = user?.id ?? null
 
   function updateParams(changes: Record<string, string | null>, replace = false) {
@@ -142,6 +144,10 @@ export default function NewsList() {
   const data = !invalidRegion && reading.ready && !reading.configError && !authLoading ? newsQuery.data : undefined
   const totalPages = Math.ceil((data?.count ?? 0) / PAGE_SIZE)
   const initialLoading = !invalidRegion && !reading.configError && !reading.needsLogin && !reading.invalidScope && (authLoading || newsQuery.isPending)
+  const reportFeedLoaded = useContext(FeedLoadingContext)
+  useEffect(() => {
+    if (!initialLoading) reportFeedLoaded?.(viewerId)
+  }, [initialLoading, reportFeedLoaded, viewerId])
   const activeFilterCount = categories.length + sources.length + (search.trim() ? 1 : 0) + (region !== 'all' ? 1 : 0)
 
   const activeGroup = reading.groups.data?.find(group => group.id === reading.groupId)

@@ -168,6 +168,7 @@ class News(models.Model):
         ordering = ['-publish_time']
         indexes = [
             models.Index(fields=['-publish_time']),
+            models.Index(fields=['related_to', '-publish_time'], name='news_feed_order_idx'),
             models.Index(fields=['title']),
             models.Index(fields=['full_content_fetch_status', 'full_content_next_attempt_at'], name='news_content_due_idx'),
         ]
