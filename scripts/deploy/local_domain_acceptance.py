@@ -37,6 +37,7 @@ CURL_FAILURE_KINDS = {
     52: 'empty server response',
     56: 'connection reset',
     60: 'TLS certificate verification failure',
+    92: 'HTTP/2 stream reset',
 }
 
 
@@ -591,8 +592,10 @@ def _curl(args: argparse.Namespace, path: str, **kwargs) -> tuple[int, str, subp
 
 
 def _curl_closed_without_http_response(result: subprocess.CompletedProcess, *, scheme: str) -> bool:
-    """Accept only the expected connection-close curl codes with no HTTP response."""
-    allowed_exit_codes = {'http': {52}, 'https': {52, 56}}
+    """Accept a connection/stream close only when no HTTP response was sent."""
+    # Nginx 444 resets an HTTP/2 stream (CURLE_HTTP2_STREAM), while HTTP/1
+    # reports an empty reply or TLS EOF. TLS/DNS/timeouts still fail this gate.
+    allowed_exit_codes = {'http': {52}, 'https': {52, 56, 92}}
     if result.returncode not in allowed_exit_codes.get(scheme, set()):
         return False
     output_body, marker, status = result.stdout.rpartition(STATUS_MARKER)

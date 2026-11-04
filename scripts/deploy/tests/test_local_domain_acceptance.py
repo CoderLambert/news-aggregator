@@ -161,7 +161,7 @@ def test_forwarded_header_spoof_uses_non_exempt_real_csrf_path_and_checks_secure
     assert checks['real_client_address_observation'].startswith('NOT_RUN:')
 
 
-@pytest.mark.parametrize(('scheme', 'exit_code'), [('http', 52), ('https', 52), ('https', 56)])
+@pytest.mark.parametrize(('scheme', 'exit_code'), [('http', 52), ('https', 52), ('https', 56), ('https', 92)])
 def test_closed_without_http_response_accepts_only_expected_empty_status(scheme, exit_code):
     result = subprocess.CompletedProcess(
         ['curl'], exit_code, f'{acceptance.STATUS_MARKER}000',
@@ -172,6 +172,7 @@ def test_closed_without_http_response_accepts_only_expected_empty_status(scheme,
 
 @pytest.mark.parametrize(('scheme', 'exit_code'), [
     ('http', 56),
+    ('http', 92),
     ('http', 35), ('http', 60), ('http', 28), ('http', 7),
     ('https', 35), ('https', 60), ('https', 28), ('https', 7),
 ])
@@ -180,7 +181,7 @@ def test_closed_without_http_response_rejects_unapproved_curl_exit_codes(scheme,
     assert not acceptance._curl_closed_without_http_response(result, scheme=scheme)
 
 
-@pytest.mark.parametrize(('scheme', 'exit_code'), [('http', 52), ('https', 52), ('https', 56)])
+@pytest.mark.parametrize(('scheme', 'exit_code'), [('http', 52), ('https', 52), ('https', 56), ('https', 92)])
 def test_closed_without_http_response_rejects_output_with_http_status_line(scheme, exit_code):
     result = subprocess.CompletedProcess(
         ['curl'], exit_code,
@@ -188,6 +189,13 @@ def test_closed_without_http_response_rejects_output_with_http_status_line(schem
         '',
     )
     assert not acceptance._curl_closed_without_http_response(result, scheme=scheme)
+
+
+def test_http2_reset_with_response_bytes_is_not_a_closed_host_guard():
+    result = subprocess.CompletedProcess(
+        ['curl'], 92, f'leaked page{acceptance.STATUS_MARKER}000', 'HTTP/2 stream reset',
+    )
+    assert not acceptance._curl_closed_without_http_response(result, scheme='https')
 
 
 @pytest.mark.parametrize(('status', 'body'), [(200, 'ok'), (403, 'forbidden')])
