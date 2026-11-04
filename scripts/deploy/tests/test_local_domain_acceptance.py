@@ -98,6 +98,7 @@ def test_absolute_uri_host_negative_keeps_tls_validation_and_fixed_host(scheme, 
 
     target_index = command.index('--request-target')
     assert command[target_index + 1] == request_target
+    assert '--http1.1' in command  # absolute-form is an HTTP/1 request target
     assert command[command.index('--header') + 1] == 'Host: evil.invalid'
     assert command[-1] == f'{scheme}://news.lambert.host:{443 if scheme == "https" else 80}/'
     assert '--cacert' in command if scheme == 'https' else '--cacert' not in command

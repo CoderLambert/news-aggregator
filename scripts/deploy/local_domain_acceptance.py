@@ -559,7 +559,10 @@ def _curl_command(args: argparse.Namespace, path: str, *, scheme: str = 'https',
     if body is not None:
         command.extend(['--data-binary', body])
     if request_target is not None:
-        command.extend(['--request-target', request_target])
+        # Absolute-form targets exercise HTTP/1 host routing. HTTP/2 :path
+        # contains only path/query (RFC 9113 8.3.1), so negotiating h2 here
+        # tests a malformed pseudo-header instead of the Host guard.
+        command.extend(['--http1.1', '--request-target', request_target])
     command.append(f'{scheme}://{HOST}:{resolved_port}{path}')
     return command
 
